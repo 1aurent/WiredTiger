@@ -1,0 +1,588 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="async\async_api.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="async\async_op.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="async\async_worker.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="block\block_addr.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="block\block_ckpt.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="block\block_compact.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="block\block_ext.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="block\block_map.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="block\block_mgr.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="block\block_open.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="block\block_read.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="block\block_session.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="block\block_slvg.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="block\block_vrfy.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="block\block_write.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="bloom\bloom.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="btree\bt_compact.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="btree\bt_curnext.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="btree\bt_curprev.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="btree\bt_cursor.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="btree\bt_delete.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="btree\bt_discard.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="btree\bt_handle.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="btree\bt_huffman.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="btree\bt_io.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="btree\bt_misc.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="btree\bt_ovfl.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="btree\bt_page.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="btree\bt_read.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="btree\bt_ret.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="btree\bt_slvg.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="btree\bt_split.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="btree\bt_stat.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="btree\bt_sync.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="btree\bt_upgrade.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="btree\bt_vrfy.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="btree\bt_vrfy_dsk.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="btree\bt_walk.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="btree\col_modify.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="btree\col_srch.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="btree\row_key.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="btree\row_modify.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="btree\row_srch.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="config\config.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="config\config_api.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="config\config_check.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="config\config_collapse.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="config\config_concat.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="config\config_def.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="config\config_ext.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="config\config_upgrade.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="conn\api_strerror.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="conn\api_version.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="conn\conn_api.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="conn\conn_cache.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="conn\conn_cache_pool.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="conn\conn_ckpt.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="conn\conn_dhandle.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="conn\conn_handle.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="conn\conn_log.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="conn\conn_open.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="conn\conn_stat.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="conn\conn_sweep.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="cursor\cur_backup.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="cursor\cur_bulk.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="cursor\cur_config.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="cursor\cur_ds.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="cursor\cur_dump.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="cursor\cur_file.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="cursor\cur_index.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="cursor\cur_json.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="cursor\cur_log.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="cursor\cur_metadata.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="cursor\cur_stat.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="cursor\cur_std.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="cursor\cur_table.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="evict\evict_file.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="evict\evict_lru.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="evict\evict_page.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="log\log.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="log\log_auto.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="log\log_slot.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="lsm\lsm_cursor.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="lsm\lsm_manager.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="lsm\lsm_merge.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="lsm\lsm_meta.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="lsm\lsm_stat.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="lsm\lsm_tree.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="lsm\lsm_work_unit.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="lsm\lsm_worker.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="meta\meta_apply.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="meta\meta_ckpt.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="meta\meta_ext.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="meta\meta_table.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="meta\meta_track.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="meta\meta_turtle.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="os_win\os_dir.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="os_win\os_dlopen.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="os_win\os_errno.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="os_win\os_exist.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="packing\pack_api.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="packing\pack_impl.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="packing\pack_stream.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="reconcile\rec_track.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="reconcile\rec_write.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="schema\schema_create.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="schema\schema_drop.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="schema\schema_list.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="schema\schema_open.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="schema\schema_plan.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="schema\schema_project.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="schema\schema_rename.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="schema\schema_stat.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="schema\schema_truncate.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="schema\schema_util.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="schema\schema_worker.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="session\session_api.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="session\session_compact.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="session\session_dhandle.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="session\session_salvage.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="support\cksum.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="support\err.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="support\filename.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="support\global.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="support\hash_city.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="support\hash_fnv.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="support\hazard.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="support\hex.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="support\huffman.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="support\mutex.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="support\pow.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="support\rand.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="support\scratch.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="support\stat.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="txn\txn.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="txn\txn_ckpt.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="txn\txn_ext.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="txn\txn_log.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="txn\txn_recover.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="utilities\util_backup.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="utilities\util_compact.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="utilities\util_cpyright.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="utilities\util_create.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="utilities\util_drop.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="utilities\util_dump.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="utilities\util_list.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="utilities\util_load.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="utilities\util_load_json.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="utilities\util_loadtext.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="utilities\util_main.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="utilities\util_misc.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="utilities\util_printlog.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="utilities\util_read.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="utilities\util_rename.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="utilities\util_salvage.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="utilities\util_stat.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="utilities\util_upgrade.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="utilities\util_verbose.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="utilities\util_verify.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="utilities\util_write.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="os_posix\os_abort.c">
+      <Filter>Psx</Filter>
+    </ClCompile>
+    <ClCompile Include="os_posix\os_alloc.c">
+      <Filter>Psx</Filter>
+    </ClCompile>
+    <ClCompile Include="os_posix\os_errno.c">
+      <Filter>Psx</Filter>
+    </ClCompile>
+    <ClCompile Include="os_posix\os_getline.c">
+      <Filter>Psx</Filter>
+    </ClCompile>
+    <ClCompile Include="os_posix\os_getopt.c">
+      <Filter>Psx</Filter>
+    </ClCompile>
+    <ClCompile Include="os_posix\os_mtx_rw.c">
+      <Filter>Psx</Filter>
+    </ClCompile>
+    <ClCompile Include="os_posix\os_strtouq.c">
+      <Filter>Psx</Filter>
+    </ClCompile>
+    <ClCompile Include="os_win\os_fallocate.c">
+      <Filter>Win</Filter>
+    </ClCompile>
+    <ClCompile Include="os_win\os_filesize.c">
+      <Filter>Win</Filter>
+    </ClCompile>
+    <ClCompile Include="os_win\os_flock.c">
+      <Filter>Win</Filter>
+    </ClCompile>
+    <ClCompile Include="os_win\os_fsync.c">
+      <Filter>Win</Filter>
+    </ClCompile>
+    <ClCompile Include="os_win\os_ftruncate.c">
+      <Filter>Win</Filter>
+    </ClCompile>
+    <ClCompile Include="os_win\os_getenv.c">
+      <Filter>Win</Filter>
+    </ClCompile>
+    <ClCompile Include="os_win\os_map.c">
+      <Filter>Win</Filter>
+    </ClCompile>
+    <ClCompile Include="os_win\os_mtx_cond.c">
+      <Filter>Win</Filter>
+    </ClCompile>
+    <ClCompile Include="os_win\os_once.c">
+      <Filter>Win</Filter>
+    </ClCompile>
+    <ClCompile Include="os_win\os_open.c">
+      <Filter>Win</Filter>
+    </ClCompile>
+    <ClCompile Include="os_win\os_path.c">
+      <Filter>Win</Filter>
+    </ClCompile>
+    <ClCompile Include="os_win\os_priv.c">
+      <Filter>Win</Filter>
+    </ClCompile>
+    <ClCompile Include="os_win\os_remove.c">
+      <Filter>Win</Filter>
+    </ClCompile>
+    <ClCompile Include="os_win\os_rename.c">
+      <Filter>Win</Filter>
+    </ClCompile>
+    <ClCompile Include="os_win\os_rw.c">
+      <Filter>Win</Filter>
+    </ClCompile>
+    <ClCompile Include="os_win\os_sleep.c">
+      <Filter>Win</Filter>
+    </ClCompile>
+    <ClCompile Include="os_win\os_snprintf.c">
+      <Filter>Win</Filter>
+    </ClCompile>
+    <ClCompile Include="os_win\os_thread.c">
+      <Filter>Win</Filter>
+    </ClCompile>
+    <ClCompile Include="os_win\os_time.c">
+      <Filter>Win</Filter>
+    </ClCompile>
+    <ClCompile Include="os_win\os_vsnprintf.c">
+      <Filter>Win</Filter>
+    </ClCompile>
+    <ClCompile Include="os_win\os_yield.c">
+      <Filter>Win</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Src">
+      <UniqueIdentifier>{7886ffc0-255d-4875-93c4-34717c534328}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Psx">
+      <UniqueIdentifier>{7c676df1-9858-44d3-90f7-35d25b2a7c56}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Win">
+      <UniqueIdentifier>{7ad23b13-33c0-44e0-b1f2-1a588f4ae1aa}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="utilities\util.h">
+      <Filter>Src</Filter>
+    </ClInclude>
+    <ClInclude Include="utilities\util_load.h">
+      <Filter>Src</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>
