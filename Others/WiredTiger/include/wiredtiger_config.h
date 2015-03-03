@@ -12,6 +12,8 @@
 
 /* Snappy support automatically loaded. */
 /* #undef HAVE_BUILTIN_EXTENSION_SNAPPY */
+#define HAVE_BUILTIN_EXTENSION_SNAPPY
+#pragma comment(lib,"Snappy.lib")
 
 /* Zlib support automatically loaded. */
 /* #undef HAVE_BUILTIN_EXTENSION_ZLIB */

@@ -562,6 +562,9 @@
     <ClCompile Include="os_win\os_errno.c">
       <Filter>Win</Filter>
     </ClCompile>
+    <ClCompile Include="snappy_compress.c">
+      <Filter>Ext</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Src">
@@ -572,6 +575,9 @@
     </Filter>
     <Filter Include="Win">
       <UniqueIdentifier>{7ad23b13-33c0-44e0-b1f2-1a588f4ae1aa}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Ext">
+      <UniqueIdentifier>{448de975-cec9-41f6-aec7-1df49549b3d3}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>

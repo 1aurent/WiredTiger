@@ -31,14 +31,15 @@ namespace WiredTigerNet {
 	};
 
 	ref class Session;
-	public ref class Cursor : public IDisposable
+	public ref class CursorBase abstract : public IDisposable
 	{
+	protected:
 		Session^ _session;
 		WT_CURSOR* _cursor;
 	internal:
-		Cursor(Session^ session, WT_CURSOR* cursor) : _session(session), _cursor(cursor){}
+		CursorBase(Session^ session, WT_CURSOR* cursor) : _session(session), _cursor(cursor){}
 	public:
-		~Cursor()
+		virtual ~CursorBase()
 		{
 			_session = nullptr;
 			if (_cursor != NULL)
@@ -46,60 +47,6 @@ namespace WiredTigerNet {
 				_cursor->close(_cursor);
 				_cursor = NULL;
 			}
-		}
-		inline Cursor^ Duplicate();
-
-		array<Byte>^ GetKey()
-		{
-			WT_ITEM item = { 0 };
-			int r=_cursor->get_key(_cursor, &item);
-			if (r != 0) throw gcnew WiredException(r);
-
-			array<Byte>^ buffer = gcnew array<Byte>(item.size);
-			Marshal::Copy((IntPtr)(void*)item.data, buffer, 0, buffer->Length);
-			return buffer;
-		}
-		array<Byte>^ GetValue()
-		{
-			WT_ITEM item = { 0 };
-			int r =_cursor->get_value(_cursor, &item);
-			if (r != 0) throw gcnew WiredException(r);
-
-			array<Byte>^ buffer = gcnew array<Byte>(item.size);
-			Marshal::Copy((IntPtr)(void*)item.data, buffer, 0, buffer->Length);
-			return buffer;
-		}
-
-		void SetKey(IntPtr data, int length)
-		{
-			WT_ITEM item = { 0 };
-			item.data = (void*)data;
-			item.size = length;
-			_cursor->set_key(_cursor, &item);
-		}
-		void SetKey(array<Byte>^ key)
-		{
-			pin_ptr<Byte> pkey = &key[0];
-			WT_ITEM item = { 0 };
-			item.data = (void*)pkey;
-			item.size = key->Length;
-			_cursor->set_key(_cursor, &item);
-		}
-
-		void SetValue(IntPtr data, int length)
-		{
-			WT_ITEM item = { 0 };
-			item.data = (void*)data;
-			item.size = length;
-			_cursor->set_value(_cursor, &item);
-		}
-		void SetValue(array<Byte>^ value)
-		{
-			pin_ptr<Byte> pvalue = &value[0];
-			WT_ITEM item = { 0 };
-			item.data = (void*)pvalue;
-			item.size = value->Length;
-			_cursor->set_value(_cursor, &item);
 		}
 
 		void Insert()
@@ -159,6 +106,121 @@ namespace WiredTigerNet {
 	};
 
 
+	public ref class Cursor  : public CursorBase
+	{
+	public:
+		Cursor(Session^ session, WT_CURSOR* cursor) : CursorBase(session,cursor)
+		{
+			if (strcmp(cursor->key_format, "u") != 0 || strcmp(cursor->value_format, "u") != 0)
+			{
+				throw gcnew Exception("Key or Value Format incompatible with this cursor!");
+			}
+		}
+
+		array<Byte>^ GetKey()
+		{
+			WT_ITEM item = { 0 };
+			int r=_cursor->get_key(_cursor, &item);
+			if (r != 0) throw gcnew WiredException(r);
+
+			array<Byte>^ buffer = gcnew array<Byte>((int)item.size);
+			Marshal::Copy((IntPtr)(void*)item.data, buffer, 0, buffer->Length);
+			return buffer;
+		}
+		array<Byte>^ GetValue()
+		{
+			WT_ITEM item = { 0 };
+			int r =_cursor->get_value(_cursor, &item);
+			if (r != 0) throw gcnew WiredException(r);
+
+			array<Byte>^ buffer = gcnew array<Byte>((int)item.size);
+			Marshal::Copy((IntPtr)(void*)item.data, buffer, 0, buffer->Length);
+			return buffer;
+		}
+
+		void SetKey(IntPtr data, int length)
+		{
+			WT_ITEM item = { 0 };
+			item.data = (void*)data;
+			item.size = length;
+			_cursor->set_key(_cursor, &item);
+		}
+		void SetKey(array<Byte>^ key)
+		{
+			pin_ptr<Byte> pkey = &key[0];
+			WT_ITEM item = { 0 };
+			item.data = (void*)pkey;
+			item.size = key->Length;
+			_cursor->set_key(_cursor, &item);
+		}
+
+		void SetValue(IntPtr data, int length)
+		{
+			WT_ITEM item = { 0 };
+			item.data = (void*)data;
+			item.size = length;
+			_cursor->set_value(_cursor, &item);
+		}
+		void SetValue(array<Byte>^ value)
+		{
+			pin_ptr<Byte> pvalue = &value[0];
+			WT_ITEM item = { 0 };
+			item.data = (void*)pvalue;
+			item.size = value->Length;
+			_cursor->set_value(_cursor, &item);
+		}
+	};
+
+	public ref class CursorLong : public CursorBase
+	{
+	public:
+		CursorLong(Session^ session, WT_CURSOR* cursor) : CursorBase(session, cursor){
+			if (strcmp(cursor->key_format, "q") != 0 || strcmp(cursor->value_format, "u") != 0)
+			{
+				throw gcnew Exception("Key or Value Format incompatible with this cursor!");
+			}
+		}
+
+		Int64 GetKey()
+		{
+			int64_t key;
+			int r = _cursor->get_key(_cursor, &key);
+			if (r != 0) throw gcnew WiredException(r);
+			return key;
+		}
+		array<Byte>^ GetValue()
+		{
+			WT_ITEM item = { 0 };
+			int r = _cursor->get_value(_cursor, &item);
+			if (r != 0) throw gcnew WiredException(r);
+
+			array<Byte>^ buffer = gcnew array<Byte>((int)item.size);
+			Marshal::Copy((IntPtr)(void*)item.data, buffer, 0, buffer->Length);
+			return buffer;
+		}
+
+		void SetKey(Int64 key)
+		{
+			int64_t vkey = key;
+			_cursor->set_key(_cursor, vkey);
+		}
+		void SetValue(IntPtr data, int length)
+		{
+			WT_ITEM item = { 0 };
+			item.data = (void*)data;
+			item.size = length;
+			_cursor->set_value(_cursor, &item);
+		}
+		void SetValue(array<Byte>^ value)
+		{
+			pin_ptr<Byte> pvalue = &value[0];
+			WT_ITEM item = { 0 };
+			item.data = (void*)pvalue;
+			item.size = value->Length;
+			_cursor->set_value(_cursor, &item);
+		}
+	};
+
 
 	public ref class Session : public IDisposable
 	{
@@ -166,16 +228,6 @@ namespace WiredTigerNet {
 	internal:
 		Session(WT_SESSION *session) : _session(session)
 		{}
-
-
-		Cursor^ DuplicateCursor(WT_CURSOR* cursor)
-		{
-			WT_CURSOR *newcursor;
-			int r = _session->open_cursor(_session, NULL, cursor, NULL, &cursor);
-			if (r != 0) throw gcnew WiredException(r);
-			return gcnew Cursor(this, cursor);
-		}
-
 	public:	
 		~Session()
 		{
@@ -270,14 +322,17 @@ namespace WiredTigerNet {
 
 			return gcnew Cursor(this, cursor);
 		}
+		CursorLong^ OpenCursorLK(String^ name)
+		{
+			WT_CURSOR *cursor;
+			const char *aname = (char*)Marshal::StringToHGlobalAnsi(name).ToPointer();
+			int r = _session->open_cursor(_session, aname, NULL, NULL, &cursor);
+			Marshal::FreeHGlobal((IntPtr)(void*)aname);
+			if (r != 0) throw gcnew WiredException(r);
 
+			return gcnew CursorLong(this, cursor);
+		}
 	};
-
-	Cursor^ Cursor::Duplicate()
-	{
-		return _session->DuplicateCursor(_cursor);
-	}
-
 
 	public ref class Connection : public IDisposable
 	{
