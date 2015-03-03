@@ -158,6 +158,7 @@
     <ClCompile Include="session\session_compact.c" />
     <ClCompile Include="session\session_dhandle.c" />
     <ClCompile Include="session\session_salvage.c" />
+    <ClCompile Include="snappy_compress.c" />
     <ClCompile Include="support\cksum.c" />
     <ClCompile Include="support\err.c" />
     <ClCompile Include="support\filename.c" />
@@ -253,6 +254,9 @@
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
+    <Lib>
+      <AdditionalLibraryDirectories>$(SolutionDir)_Inter\_Lib$(Platform)\$(Configuration)\</AdditionalLibraryDirectories>
+    </Lib>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -271,6 +275,9 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
     </Link>
+    <Lib>
+      <AdditionalLibraryDirectories>$(SolutionDir)_Inter\_Lib$(Platform)\$(Configuration)\</AdditionalLibraryDirectories>
+    </Lib>
   </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

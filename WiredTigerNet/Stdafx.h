@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <string.h>
 
 #pragma comment(lib,"WiredTiger.lib")
 
