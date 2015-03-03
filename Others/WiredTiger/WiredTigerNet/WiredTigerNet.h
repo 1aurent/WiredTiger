@@ -70,6 +70,13 @@ namespace WiredTigerNet {
 			return buffer;
 		}
 
+		void SetKey(IntPtr data, int length)
+		{
+			WT_ITEM item = { 0 };
+			item.data = (void*)data;
+			item.size = length;
+			_cursor->set_key(_cursor, &item);
+		}
 		void SetKey(array<Byte>^ key)
 		{
 			pin_ptr<Byte> pkey = &key[0];
@@ -79,6 +86,13 @@ namespace WiredTigerNet {
 			_cursor->set_key(_cursor, &item);
 		}
 
+		void SetValue(IntPtr data, int length)
+		{
+			WT_ITEM item = { 0 };
+			item.data = (void*)data;
+			item.size = length;
+			_cursor->set_value(_cursor, &item);
+		}
 		void SetValue(array<Byte>^ value)
 		{
 			pin_ptr<Byte> pvalue = &value[0];

@@ -289,18 +289,6 @@
     <ClCompile Include="meta\meta_turtle.c">
       <Filter>Src</Filter>
     </ClCompile>
-    <ClCompile Include="os_win\os_dir.c">
-      <Filter>Src</Filter>
-    </ClCompile>
-    <ClCompile Include="os_win\os_dlopen.c">
-      <Filter>Src</Filter>
-    </ClCompile>
-    <ClCompile Include="os_win\os_errno.c">
-      <Filter>Src</Filter>
-    </ClCompile>
-    <ClCompile Include="os_win\os_exist.c">
-      <Filter>Src</Filter>
-    </ClCompile>
     <ClCompile Include="packing\pack_api.c">
       <Filter>Src</Filter>
     </ClCompile>
@@ -487,9 +475,6 @@
     <ClCompile Include="os_posix\os_alloc.c">
       <Filter>Psx</Filter>
     </ClCompile>
-    <ClCompile Include="os_posix\os_errno.c">
-      <Filter>Psx</Filter>
-    </ClCompile>
     <ClCompile Include="os_posix\os_getline.c">
       <Filter>Psx</Filter>
     </ClCompile>
@@ -563,6 +548,18 @@
       <Filter>Win</Filter>
     </ClCompile>
     <ClCompile Include="os_win\os_yield.c">
+      <Filter>Win</Filter>
+    </ClCompile>
+    <ClCompile Include="os_win\os_exist.c">
+      <Filter>Win</Filter>
+    </ClCompile>
+    <ClCompile Include="os_win\os_dir.c">
+      <Filter>Win</Filter>
+    </ClCompile>
+    <ClCompile Include="os_win\os_dlopen.c">
+      <Filter>Win</Filter>
+    </ClCompile>
+    <ClCompile Include="os_win\os_errno.c">
       <Filter>Win</Filter>
     </ClCompile>
   </ItemGroup>
