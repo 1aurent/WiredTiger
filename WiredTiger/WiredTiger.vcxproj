@@ -109,7 +109,6 @@
     <ClCompile Include="meta\meta_turtle.c" />
     <ClCompile Include="os_posix\os_abort.c" />
     <ClCompile Include="os_posix\os_alloc.c" />
-    <ClCompile Include="os_posix\os_errno.c" />
     <ClCompile Include="os_posix\os_getline.c" />
     <ClCompile Include="os_posix\os_getopt.c" />
     <ClCompile Include="os_posix\os_mtx_rw.c" />
