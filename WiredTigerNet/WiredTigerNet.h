@@ -34,14 +34,11 @@ namespace WiredTigerNet {
 	public ref class CursorBase abstract : public IDisposable
 	{
 	protected:
-		Session^ _session;
 		WT_CURSOR* _cursor;
-	internal:
-		CursorBase(Session^ session, WT_CURSOR* cursor) : _session(session), _cursor(cursor){}
+		CursorBase(WT_CURSOR* cursor) : _cursor(cursor){}
 	public:
 		virtual ~CursorBase()
 		{
-			_session = nullptr;
 			if (_cursor != NULL)
 			{
 				_cursor->close(_cursor);
@@ -108,15 +105,15 @@ namespace WiredTigerNet {
 
 	public ref class Cursor  : public CursorBase
 	{
-	public:
-		Cursor(Session^ session, WT_CURSOR* cursor) : CursorBase(session,cursor)
+	internal:
+		Cursor(WT_CURSOR* cursor) : CursorBase(cursor)
 		{
 			if (strcmp(cursor->key_format, "u") != 0 || strcmp(cursor->value_format, "u") != 0)
 			{
 				throw gcnew Exception("Key or Value Format incompatible with this cursor!");
 			}
 		}
-
+	public:
 		array<Byte>^ GetKey()
 		{
 			WT_ITEM item = { 0 };
@@ -173,14 +170,14 @@ namespace WiredTigerNet {
 
 	public ref class CursorLong : public CursorBase
 	{
-	public:
-		CursorLong(Session^ session, WT_CURSOR* cursor) : CursorBase(session, cursor){
+	internal:
+		CursorLong(WT_CURSOR* cursor) : CursorBase(cursor){
 			if (strcmp(cursor->key_format, "q") != 0 || strcmp(cursor->value_format, "u") != 0)
 			{
 				throw gcnew Exception("Key or Value Format incompatible with this cursor!");
 			}
 		}
-
+	public:
 		Int64 GetKey()
 		{
 			int64_t key;
@@ -320,7 +317,7 @@ namespace WiredTigerNet {
 			Marshal::FreeHGlobal((IntPtr)(void*)aname);
 			if (r != 0) throw gcnew WiredException(r);
 
-			return gcnew Cursor(this, cursor);
+			return gcnew Cursor(cursor);
 		}
 		CursorLong^ OpenCursorLK(String^ name)
 		{
@@ -330,7 +327,7 @@ namespace WiredTigerNet {
 			Marshal::FreeHGlobal((IntPtr)(void*)aname);
 			if (r != 0) throw gcnew WiredException(r);
 
-			return gcnew CursorLong(this, cursor);
+			return gcnew CursorLong(cursor);
 		}
 	};
 
