@@ -36,7 +36,7 @@
 #include <string>
 #include <vector>
 
-typedef size_t ssize_t;
+typedef __int64 ssize_t;	//< SIGNED! size_t (or it crash!)
 #pragma warning(disable:4244)
 #pragma warning(disable:4267)
 

@@ -243,9 +243,9 @@ namespace WiredTigerNet {
 
 		void BeginTran(String^ config)
 		{
-			const char *aconfig = (char*)Marshal::StringToHGlobalAnsi(config).ToPointer();
+			const char *aconfig = String::IsNullOrWhiteSpace(config) ? NULL : (char*)Marshal::StringToHGlobalAnsi(config).ToPointer();
 			int r = _session->begin_transaction(_session, aconfig);
-			Marshal::FreeHGlobal((IntPtr)(void*)aconfig);
+			if(aconfig) Marshal::FreeHGlobal((IntPtr)(void*)aconfig);
 			if (r != 0) throw gcnew WiredException(r);
 		}
 
@@ -267,9 +267,9 @@ namespace WiredTigerNet {
 		}
 		void Checkpoint(String^ config)
 		{
-			const char *aconfig = (char*)Marshal::StringToHGlobalAnsi(config).ToPointer();
+			const char *aconfig = String::IsNullOrWhiteSpace(config) ? NULL : (char*)Marshal::StringToHGlobalAnsi(config).ToPointer();
 			int r = _session->checkpoint(_session, aconfig);
-			Marshal::FreeHGlobal((IntPtr)(void*)aconfig);
+			if(aconfig) Marshal::FreeHGlobal((IntPtr)(void*)aconfig);
 			if (r != 0) throw gcnew WiredException(r);
 		}
 
@@ -284,10 +284,10 @@ namespace WiredTigerNet {
 		void Create(String^ name, String^ config)
 		{
 			const char *aname = (char*)Marshal::StringToHGlobalAnsi(name).ToPointer();
-			const char *aconfig = (char*)Marshal::StringToHGlobalAnsi(config).ToPointer();
+			const char *aconfig = String::IsNullOrWhiteSpace(config) ? NULL : (char*)Marshal::StringToHGlobalAnsi(config).ToPointer();
 			int r = _session->create(_session, aname, aconfig);
 			Marshal::FreeHGlobal((IntPtr)(void*)aname);
-			Marshal::FreeHGlobal((IntPtr)(void*)aconfig);
+			if(aconfig) Marshal::FreeHGlobal((IntPtr)(void*)aconfig);
 			if (r != 0) throw gcnew WiredException(r);
 		}
 
@@ -319,12 +319,36 @@ namespace WiredTigerNet {
 
 			return gcnew Cursor(cursor);
 		}
+		Cursor^ OpenCursor(String^ name, String^ config)
+		{
+			WT_CURSOR *cursor;
+			const char *aname = (char*)Marshal::StringToHGlobalAnsi(name).ToPointer();
+			const char *aconfig = String::IsNullOrWhiteSpace(config) ? NULL : (char*)Marshal::StringToHGlobalAnsi(config).ToPointer();
+			int r = _session->open_cursor(_session, aname, NULL, aconfig, &cursor);
+			Marshal::FreeHGlobal((IntPtr)(void*)aname);
+			if(aconfig) Marshal::FreeHGlobal((IntPtr)(void*)aconfig);
+			if (r != 0) throw gcnew WiredException(r);
+
+			return gcnew Cursor(cursor);
+		}
 		CursorLong^ OpenCursorLK(String^ name)
 		{
 			WT_CURSOR *cursor;
 			const char *aname = (char*)Marshal::StringToHGlobalAnsi(name).ToPointer();
 			int r = _session->open_cursor(_session, aname, NULL, NULL, &cursor);
 			Marshal::FreeHGlobal((IntPtr)(void*)aname);
+			if (r != 0) throw gcnew WiredException(r);
+
+			return gcnew CursorLong(cursor);
+		}
+		CursorLong^ OpenCursorLK(String^ name, String^ config)
+		{
+			WT_CURSOR *cursor;
+			const char *aname = (char*)Marshal::StringToHGlobalAnsi(name).ToPointer();
+			const char *aconfig = String::IsNullOrWhiteSpace(config) ? NULL : (char*)Marshal::StringToHGlobalAnsi(config).ToPointer();
+			int r = _session->open_cursor(_session, aname, NULL, aconfig, &cursor);
+			Marshal::FreeHGlobal((IntPtr)(void*)aname);
+			if (aconfig) Marshal::FreeHGlobal((IntPtr)(void*)aconfig);
 			if (r != 0) throw gcnew WiredException(r);
 
 			return gcnew CursorLong(cursor);
@@ -349,10 +373,10 @@ namespace WiredTigerNet {
 
 		Session^ OpenSession(String^ config)
 		{
-			const char *aconfig = (char*)Marshal::StringToHGlobalAnsi(config).ToPointer();
+			const char *aconfig = String::IsNullOrWhiteSpace(config) ? NULL : (char*)Marshal::StringToHGlobalAnsi(config).ToPointer();
 			WT_SESSION *session;
 			int r = _connection->open_session(_connection, NULL, aconfig, &session);
-			Marshal::FreeHGlobal((IntPtr)(void*)aconfig);
+			if (aconfig) Marshal::FreeHGlobal((IntPtr)(void*)aconfig);
 			if (r != 0) throw gcnew WiredException(r);
 
 			return gcnew Session(session);
@@ -381,13 +405,13 @@ namespace WiredTigerNet {
 			WT_CONNECTION *connectionp;
 
 			const char *ahome = (char*)Marshal::StringToHGlobalAnsi(home).ToPointer();
-			const char *aconfig = (char*)Marshal::StringToHGlobalAnsi(config).ToPointer();
+			const char *aconfig = String::IsNullOrWhiteSpace(config) ? NULL : (char*)Marshal::StringToHGlobalAnsi(config).ToPointer();
 
 			Connection^ ret = gcnew Connection();
 
 			int r= wiredtiger_open(ahome,NULL /*WT_EVENT_HANDLER *errhandler*/, aconfig,&connectionp);
 			Marshal::FreeHGlobal((IntPtr)(void*)ahome);
-			Marshal::FreeHGlobal((IntPtr)(void*)aconfig);
+			if (aconfig) Marshal::FreeHGlobal((IntPtr)(void*)aconfig);
 			if (r != 0) throw gcnew WiredException(r);
 
 			ret->_connection = connectionp;
