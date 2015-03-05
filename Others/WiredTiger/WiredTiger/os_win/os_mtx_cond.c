@@ -40,12 +40,12 @@ __wt_cond_alloc(WT_SESSION_IMPL *session,
  *	Wait on a mutex, optionally timing out.
  */
 int
-__wt_cond_wait(WT_SESSION_IMPL *session, WT_CONDVAR *cond, long usecs)
+__wt_cond_wait(WT_SESSION_IMPL *session, WT_CONDVAR *cond, unsigned long usecs)
 {
 	WT_DECL_RET;
 	int locked;
 	int lasterror;
-	int milliseconds;
+	DWORD milliseconds;
 	locked = 0;
 	WT_ASSERT(session, usecs >= 0);
 
@@ -66,8 +66,14 @@ __wt_cond_wait(WT_SESSION_IMPL *session, WT_CONDVAR *cond, long usecs)
 	EnterCriticalSection(&cond->mtx);
 	locked = 1;
 
-	if (usecs > 0) {
-		milliseconds = usecs / 1000;
+	if (usecs == 0)
+	{
+		ret = SleepConditionVariableCS(
+			&cond->cond, &cond->mtx, INFINITE);
+	}
+	else //if (usecs > 0) 
+	{
+		milliseconds = usecs / 1000UL;
 		/*
 		 * 0 would mean the CV sleep becomes a TryCV which we do not
 		 * want
@@ -76,9 +82,8 @@ __wt_cond_wait(WT_SESSION_IMPL *session, WT_CONDVAR *cond, long usecs)
 			milliseconds = 1;
 		ret = SleepConditionVariableCS(
 		    &cond->cond, &cond->mtx, milliseconds);
-	} else
-		ret = SleepConditionVariableCS(
-		    &cond->cond, &cond->mtx, INFINITE);
+	}
+
 
 	if (ret == 0) {
 		lasterror = GetLastError();
