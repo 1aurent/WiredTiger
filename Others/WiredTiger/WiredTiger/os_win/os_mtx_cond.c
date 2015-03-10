@@ -40,9 +40,10 @@ __wt_cond_alloc(WT_SESSION_IMPL *session,
  *	Wait on a mutex, optionally timing out.
  */
 int
-__wt_cond_wait(WT_SESSION_IMPL *session, WT_CONDVAR *cond, unsigned long usecs)
+__wt_cond_wait(WT_SESSION_IMPL *session, WT_CONDVAR *cond, uint64_t usecs)
 {
 	WT_DECL_RET;
+	uint64_t milliseconds64;
 	int locked;
 	int lasterror;
 	DWORD milliseconds;
@@ -66,28 +67,32 @@ __wt_cond_wait(WT_SESSION_IMPL *session, WT_CONDVAR *cond, unsigned long usecs)
 	EnterCriticalSection(&cond->mtx);
 	locked = 1;
 
-	if (usecs == 0)
-	{
-		ret = SleepConditionVariableCS(
-			&cond->cond, &cond->mtx, INFINITE);
-	}
-	else //if (usecs > 0) 
-	{
-		milliseconds = usecs / 1000UL;
+	if (usecs > 0) {
+		milliseconds64 = usecs / 1000;
+
+		/*
+		 * Check for 32-bit unsigned integer overflow
+		 * INFINITE is max unsigned int on Windows
+		 */
+		if (milliseconds64 >= INFINITE)
+			milliseconds64 = INFINITE - 1;
+		milliseconds = milliseconds64;
+
 		/*
 		 * 0 would mean the CV sleep becomes a TryCV which we do not
 		 * want
 		 */
 		if (milliseconds == 0)
 			milliseconds = 1;
+
 		ret = SleepConditionVariableCS(
 		    &cond->cond, &cond->mtx, milliseconds);
-	}
-
+	} else
+		ret = SleepConditionVariableCS(
+		    &cond->cond, &cond->mtx, INFINITE);
 
 	if (ret == 0) {
-		lasterror = GetLastError();
-		if (lasterror == ERROR_TIMEOUT) {
+		if (GetLastError() == ERROR_TIMEOUT) {
 			ret = 1;
 		}
 	}
@@ -100,7 +105,6 @@ __wt_cond_wait(WT_SESSION_IMPL *session, WT_CONDVAR *cond, unsigned long usecs)
 		return (0);
 	WT_RET_MSG(session, ret, "SleepConditionVariableCS");
 }
-
 /*
  * __wt_cond_signal --
  *	Signal a waiting thread.
