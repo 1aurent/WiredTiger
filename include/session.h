@@ -1,4 +1,5 @@
 /*-
+ * Copyright (c) 2014-2015 MongoDB, Inc.
  * Copyright (c) 2008-2014 WiredTiger, Inc.
  *	All rights reserved.
  *
@@ -41,7 +42,7 @@ struct __wt_hazard {
  * WT_SESSION_IMPL --
  *	Implementation of WT_SESSION.
  */
-struct __wt_session_impl {
+struct WT_COMPILER_TYPE_ALIGN(WT_CACHE_LINE_ALIGNMENT) __wt_session_impl {
 	WT_SESSION iface;
 
 	void	*lang_private;		/* Language specific private storage */
@@ -96,6 +97,7 @@ struct __wt_session_impl {
 
 	WT_ITEM	**scratch;		/* Temporary memory for any function */
 	u_int	scratch_alloc;		/* Currently allocated */
+	size_t scratch_cached;		/* Scratch bytes cached */
 #ifdef HAVE_DIAGNOSTIC
 	/*
 	 * It's hard to figure out from where a buffer was allocated after it's
@@ -108,6 +110,8 @@ struct __wt_session_impl {
 		int line;
 	} *scratch_track;
 #endif
+
+	WT_ITEM err;			/* Error buffer */
 
 	WT_TXN_ISOLATION isolation;
 	WT_TXN	txn;			/* Transaction state */
@@ -188,4 +192,4 @@ struct __wt_session_impl {
 	uint32_t   hazard_size;		/* Allocated slots in hazard array. */
 	uint32_t   nhazard;		/* Count of active hazard pointers */
 	WT_HAZARD *hazard;		/* Hazard pointer array */
-} WT_GCC_ATTRIBUTE((aligned(WT_CACHE_LINE_ALIGNMENT)));
+};

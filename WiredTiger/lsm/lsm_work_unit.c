@@ -1,4 +1,5 @@
 /*-
+ * Copyright (c) 2014-2015 MongoDB, Inc.
  * Copyright (c) 2008-2014 WiredTiger, Inc.
  *	All rights reserved.
  *
@@ -78,8 +79,7 @@ __wt_lsm_get_chunk_to_flush(WT_SESSION_IMPL *session,
 
 	WT_ASSERT(session, lsm_tree->queue_ref > 0);
 	WT_RET(__wt_lsm_tree_readlock(session, lsm_tree));
-	if (!F_ISSET(lsm_tree, WT_LSM_TREE_ACTIVE) ||
-	    lsm_tree->nchunks == 0)
+	if (!F_ISSET(lsm_tree, WT_LSM_TREE_ACTIVE) || lsm_tree->nchunks == 0)
 		return (__wt_lsm_tree_readunlock(session, lsm_tree));
 
 	/* Search for a chunk to evict and/or a chunk to flush. */
@@ -117,16 +117,15 @@ __wt_lsm_get_chunk_to_flush(WT_SESSION_IMPL *session,
 		chunk = (evict_chunk != NULL) ? evict_chunk : flush_chunk;
 
 	if (chunk != NULL) {
-		(void)WT_ATOMIC_ADD4(chunk->refcnt, 1);
 		WT_ERR(__wt_verbose(session, WT_VERB_LSM,
 		    "Flush%s: return chunk %u of %u: %s",
 		    force ? " w/ force" : "",
 		    i, lsm_tree->nchunks, chunk->uri));
+
+		(void)WT_ATOMIC_ADD4(chunk->refcnt, 1);
 	}
 
-err:	if (ret != 0 && chunk != NULL)
-		(void)WT_ATOMIC_SUB4(chunk->refcnt, 1);
-	WT_RET(__wt_lsm_tree_readunlock(session, lsm_tree));
+err:	WT_RET(__wt_lsm_tree_readunlock(session, lsm_tree));
 
 	*chunkp = chunk;
 	return (ret);
@@ -359,8 +358,8 @@ __wt_lsm_checkpoint_chunk(WT_SESSION_IMPL *session,
 
 	WT_RET(__wt_verbose(session, WT_VERB_LSM, "LSM worker checkpointed %s",
 	    chunk->uri));
-	/*
-	 * Schedule a bloom filter create for our newly flushed chunk */
+
+	/* Schedule a bloom filter create for our newly flushed chunk. */
 	if (!FLD_ISSET(lsm_tree->bloom, WT_LSM_BLOOM_OFF))
 		WT_RET(__wt_lsm_manager_push_entry(
 		    session, WT_LSM_WORK_BLOOM, 0, lsm_tree));

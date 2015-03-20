@@ -1,4 +1,5 @@
 /*-
+ * Copyright (c) 2014-2015 MongoDB, Inc.
  * Copyright (c) 2008-2014 WiredTiger, Inc.
  *	All rights reserved.
  *
@@ -12,9 +13,10 @@
 #define	WT_EVICT_INT_SKEW  (1<<20)	/* Prefer leaf pages over internal
 					   pages by this many increments of the
 					   read generation. */
-#define	WT_EVICT_WALK_PER_FILE	10	/* Pages to visit per file */
-#define	WT_EVICT_WALK_BASE     300	/* Pages tracked across file visits */
-#define	WT_EVICT_WALK_INCR     100	/* Pages added each walk */
+#define	WT_EVICT_WALK_PER_FILE	 10	/* Pages to queue per file */
+#define	WT_EVICT_MAX_PER_FILE	100	/* Max pages to visit per file */
+#define	WT_EVICT_WALK_BASE	300	/* Pages tracked across file visits */
+#define	WT_EVICT_WALK_INCR	100	/* Pages added each walk */
 
 #define	WT_EVICT_PASS_AGGRESSIVE	0x01
 #define	WT_EVICT_PASS_ALL		0x02
@@ -59,6 +61,9 @@ struct __wt_cache {
 	uint64_t pages_evict;
 	uint64_t bytes_dirty;		/* Bytes/pages currently dirty */
 	uint64_t pages_dirty;
+	uint64_t bytes_read;		/* Bytes read into memory */
+
+	uint64_t evict_max_page_size;	/* Largest page seen at eviction */
 
 	/*
 	 * Read information.
@@ -77,6 +82,8 @@ struct __wt_cache {
 	u_int eviction_trigger;		/* Percent to trigger eviction */
 	u_int eviction_target;		/* Percent to end eviction */
 	u_int eviction_dirty_target;    /* Percent to allow dirty */
+
+	u_int overhead_pct;	        /* Cache percent adjustment */
 
 	/*
 	 * LRU eviction list information.
@@ -99,8 +106,8 @@ struct __wt_cache {
 	/*
 	 * Cache pool information.
 	 */
-	uint64_t cp_saved_evict;	/* Evict count from last pass */
-	uint64_t cp_current_evict;	/* Evict count from current pass */
+	uint64_t cp_saved_read;		/* Read count from last pass */
+	uint64_t cp_current_read;	/* Read count from current pass */
 	uint32_t cp_skip_count;		/* Post change stabilization */
 	uint64_t cp_reserved;		/* Base size for this cache */
 	WT_SESSION_IMPL *cp_session;	/* May be used for cache management */
@@ -111,10 +118,9 @@ struct __wt_cache {
 	 */
 #define	WT_CACHE_POOL_MANAGER	0x01	/* The active cache pool manager */
 #define	WT_CACHE_POOL_RUN	0x02	/* Cache pool thread running */
-#define	WT_EVICT_ACTIVE		0x04	/* Eviction server is active */
-#define	WT_EVICT_CLEAR_WALKS	0x08	/* Clear eviction walks */
-#define	WT_EVICT_STUCK		0x10	/* Eviction server is stuck */
-#define	WT_EVICT_WOULD_BLOCK	0x20	/* Pages that would block apps */
+#define	WT_EVICT_CLEAR_WALKS	0x04	/* Clear eviction walks */
+#define	WT_EVICT_STUCK		0x08	/* Eviction server is stuck */
+#define	WT_EVICT_WOULD_BLOCK	0x10	/* Pages that would block apps */
 	uint32_t flags;
 };
 

@@ -1,4 +1,5 @@
 /*-
+ * Copyright (c) 2014-2015 MongoDB, Inc.
  * Copyright (c) 2008-2014 WiredTiger, Inc.
  *	All rights reserved.
  *
@@ -201,8 +202,9 @@ typedef struct {
 	 * because we've already been forced to split.
 	 */
 	enum {	SPLIT_BOUNDARY=0,	/* Next: a split page boundary */
-		SPLIT_TRACKING_OFF=1,	/* No boundary checks */
-		SPLIT_TRACKING_RAW=2 }	/* Underlying compression decides */
+		SPLIT_MAX=1,		/* Next: the maximum page boundary */
+		SPLIT_TRACKING_OFF=2,	/* No boundary checks */
+		SPLIT_TRACKING_RAW=3 }	/* Underlying compression decides */
 	bnd_state;
 
 	/*
@@ -439,8 +441,11 @@ __wt_reconcile(WT_SESSION_IMPL *session,
 	 * Root pages are special, splits have to be done, we can't put it off
 	 * as the parent's problem any more.
 	 */
-	if (__wt_ref_is_root(ref))
-		return (__rec_root_write(session, page, flags));
+	if (__wt_ref_is_root(ref)) {
+		WT_WITH_PAGE_INDEX(session,
+		    ret = __rec_root_write(session, page, flags));
+		return (ret);
+	}
 
 	/*
 	 * Otherwise, mark the page's parent dirty.
@@ -503,6 +508,7 @@ __rec_root_write(WT_SESSION_IMPL *session, WT_PAGE *page, uint32_t flags)
 	WT_ILLEGAL_VALUE(session);
 	}
 
+	WT_ASSERT(session, session->split_gen != 0);
 	pindex = WT_INTL_INDEX_COPY(next);
 	for (i = 0; i < mod->mod_multi_entries; ++i) {
 		WT_ERR(__wt_multi_to_ref(session,
@@ -1879,7 +1885,7 @@ __rec_split_row_promote(
 		}
 	ret = __wt_buf_set(session, key, r->cur->data, size);
 
-err:	__wt_scr_free(&update);
+err:	__wt_scr_free(session, &update);
 	return (ret);
 }
 
@@ -1919,7 +1925,7 @@ __rec_split(WT_SESSION_IMPL *session, WT_RECONCILE *r, size_t next_len)
 	WT_BOUNDARY *last, *next;
 	WT_BTREE *btree;
 	WT_PAGE_HEADER *dsk;
-	size_t len;
+	size_t inuse;
 
 	btree = S2BT(session);
 	dsk = r->dsk.mem;
@@ -1936,10 +1942,16 @@ __rec_split(WT_SESSION_IMPL *session, WT_RECONCILE *r, size_t next_len)
 	/* Hitting a page boundary resets the dictionary, in all cases. */
 	__rec_dictionary_reset(r);
 
+	inuse = WT_PTRDIFF32(r->first_free, dsk);
 	switch (r->bnd_state) {
 	case SPLIT_BOUNDARY:
-		/* We can get here if the first key/value pair won't fit. */
-		if (r->entries == 0)
+		/*
+		 * We can get here if the first key/value pair won't fit.
+		 * Additionally, grow the buffer to contain the current item if
+		 * we haven't already consumed a reasonable portion of a split
+		 * chunk.
+		 */
+		if (inuse < r->split_size / 2)
 			break;
 
 		/*
@@ -1975,21 +1987,25 @@ __rec_split(WT_SESSION_IMPL *session, WT_RECONCILE *r, size_t next_len)
 		 * have one.  If we don't have room for another split chunk,
 		 * add whatever space remains in this page.
 		 */
-		len = WT_PTRDIFF32(r->first_free, dsk);
-		if (len + r->split_size <= r->page_size)
-			r->space_avail =
-			    r->split_size - WT_PAGE_HEADER_BYTE_SIZE(btree);
-		else {
-			WT_ASSERT(session, r->page_size >=
-			    (WT_PAGE_HEADER_BYTE_SIZE(btree) + len));
-			r->space_avail = r->page_size -
-			    (WT_PAGE_HEADER_BYTE_SIZE(btree) + len);
+		r->space_avail =
+		    r->split_size - WT_PAGE_HEADER_BYTE_SIZE(btree);
+		if (inuse + r->space_avail > r->page_size) {
+			WT_ASSERT(session, r->page_size >= inuse);
+			r->space_avail = r->page_size - inuse;
+
+			/* There are no further boundary points. */
+			r->bnd_state = SPLIT_MAX;
 		}
 
-		/* If the next object fits into this page, we're good to go. */
+		/*
+		 * Return if the next object fits into this page, else we have
+		 * to split the page.
+		 */
 		if (r->space_avail >= next_len)
 			return (0);
 
+		/* FALLTHROUGH */
+	case SPLIT_MAX:
 		/*
 		 * We're going to have to split and create multiple pages.
 		 *
@@ -1999,16 +2015,18 @@ __rec_split(WT_SESSION_IMPL *session, WT_RECONCILE *r, size_t next_len)
 		 * any unwritten chunk of data to the beginning of the buffer.
 		 */
 		WT_RET(__rec_split_fixup(session, r));
+
+		/* We're done saving split chunks. */
+		r->bnd_state = SPLIT_TRACKING_OFF;
 		break;
 	case SPLIT_TRACKING_OFF:
 		/*
 		 * We can get here if the first key/value pair won't fit.
-		 * Additionally, grow the buffer to contain the current data if
-		 * we haven't already consumed a reasonable portion of the page.
+		 * Additionally, grow the buffer to contain the current item if
+		 * we haven't already consumed a reasonable portion of a split
+		 * chunk.
 		 */
-		if (r->entries == 0)
-			break;
-		if (WT_PTRDIFF(r->first_free, r->dsk.mem) < r->page_size / 2)
+		if (inuse < r->split_size / 2)
 			break;
 
 		/*
@@ -2068,9 +2086,6 @@ __rec_split(WT_SESSION_IMPL *session, WT_RECONCILE *r, size_t next_len)
 	 */
 	if (r->space_avail < next_len)
 		WT_RET(__rec_split_grow(session, r, next_len));
-
-	/* We're done saving split chunks. */
-	r->bnd_state = SPLIT_TRACKING_OFF;
 
 	return (0);
 }
@@ -2431,15 +2446,7 @@ no_slots:
 		 * the "page" and try again after we accumulate some more rows.
 		 */
 		WT_STAT_FAST_DATA_INCR(session, compress_raw_fail_temporary);
-
-split_grow:	/*
-		 * Double the page size and make sure we accommodate at least
-		 * one more record. The reason for the latter is that we may
-		 * be here because there's a large key/value pair that won't
-		 * fit in our initial page buffer, even at its expanded size.
-		 */
-		r->page_size *= 2;
-		return (__rec_split_grow(session, r, r->page_size + next_len));
+		goto split_grow;
 	}
 
 	/* We have a block, update the boundary counter. */
@@ -2461,6 +2468,22 @@ split_grow:	/*
 	} else
 		WT_RET(
 		    __rec_split_write(session, r, last, write_ref, last_block));
+
+	/*
+	 * We got called because there wasn't enough room in the buffer for the
+	 * next key and we might or might not have written a block. In any case,
+	 * make sure the next key fits into the buffer.
+	 */
+	if (r->space_avail < next_len) {
+split_grow:	/*
+		 * Double the page size and make sure we accommodate at least
+		 * one more record. The reason for the latter is that we may
+		 * be here because there's a large key/value pair that won't
+		 * fit in our initial page buffer, even at its expanded size.
+		 */
+		r->page_size *= 2;
+		return (__rec_split_grow(session, r, r->page_size + next_len));
+	}
 	return (0);
 }
 
@@ -2502,7 +2525,7 @@ __rec_raw_decompress(
 	WT_ASSERT(session, __wt_verify_dsk_image(
 	    session, "[raw evict split]", tmp->data, dsk->mem_size, 0) == 0);
 
-err:	__wt_scr_free(&tmp);
+err:	__wt_scr_free(session, &tmp);
 	return (ret);
 }
 
@@ -2529,6 +2552,7 @@ __rec_split_finish_std(WT_SESSION_IMPL *session, WT_RECONCILE *r)
 	/* Adjust the boundary information based on our split status. */
 	switch (r->bnd_state) {
 	case SPLIT_BOUNDARY:
+	case SPLIT_MAX:
 		/*
 		 * We never split, the reconciled page fit into a maximum page
 		 * size.  Change the first boundary slot to represent the full
@@ -2649,22 +2673,31 @@ __rec_split_fixup(WT_SESSION_IMPL *session, WT_RECONCILE *r)
 
 	/*
 	 * There is probably a remnant in the working buffer that didn't get
-	 * written; copy it down to the beginning of the working buffer, and
-	 * update the starting record number.
+	 * written, copy it down to the beginning of the working buffer.
 	 *
-	 * Confirm the remnant is no larger than the available split buffer.
-	 *
-	 * Fix up our caller's information.
+	 * Confirm the remnant is no larger than a split-sized chunk, including
+	 * header. We know that's the maximum sized remnant because we only have
+	 * remnants if split switches from accumulating to a split boundary to
+	 * accumulating to the end of the page (the other path here is when we
+	 * hit a split boundary, there was room for another split chunk in the
+	 * page, and the next item still wouldn't fit, in which case there is no
+	 * remnant). So: we were accumulating to the end of the page and created
+	 * a remnant. We know the remnant cannot be as large as a split-sized
+	 * chunk, including header, because if there was room for that large a
+	 * remnant, we wouldn't have switched from accumulating to a page end.
 	 */
 	len = WT_PTRDIFF32(r->first_free, bnd->start);
 	if (len >= r->split_size - WT_PAGE_HEADER_BYTE_SIZE(btree))
 		WT_PANIC_ERR(session, EINVAL,
 		    "Reconciliation remnant too large for the split buffer");
-
 	dsk = r->dsk.mem;
 	dsk_start = WT_PAGE_HEADER_BYTE(btree, dsk);
 	(void)memmove(dsk_start, bnd->start, len);
 
+	/*
+	 * Fix up our caller's information, including updating the starting
+	 * record number.
+	 */
 	r->entries -= r->total_entries;
 	r->first_free = dsk_start + len;
 	WT_ASSERT(session,
@@ -2672,7 +2705,7 @@ __rec_split_fixup(WT_SESSION_IMPL *session, WT_RECONCILE *r)
 	r->space_avail =
 	    r->split_size - (WT_PAGE_HEADER_BYTE_SIZE(btree) + len);
 
-err:	__wt_scr_free(&tmp);
+err:	__wt_scr_free(session, &tmp);
 	return (ret);
 }
 
@@ -2861,7 +2894,7 @@ skip_check_complete:
 	bnd->addr.size = (uint8_t)addr_size;
 
 done:
-err:	__wt_scr_free(&key);
+err:	__wt_scr_free(session, &key);
 	return (ret);
 }
 
@@ -2886,7 +2919,7 @@ __wt_bulk_init(WT_SESSION_IMPL *session, WT_CURSOR_BULK *cbulk)
 		WT_RET_MSG(session, EINVAL,
 		    "bulk-load is only possible for newly created trees");
 
-	/* Set a reference to the empty leaf page. */
+	/* Get a reference to the empty leaf page. */
 	pindex = WT_INTL_INDEX_COPY(btree->root.page);
 	cbulk->ref = pindex->index[0];
 	cbulk->leaf = cbulk->ref->page;
@@ -3915,7 +3948,7 @@ compare:		/*
 	/* Write the remnant page. */
 	ret = __rec_split_finish(session, r);
 
-err:	__wt_scr_free(&orig);
+err:	__wt_scr_free(session, &orig);
 	return (ret);
 }
 
@@ -3996,7 +4029,6 @@ __rec_row_int(WT_SESSION_IMPL *session, WT_RECONCILE *r, WT_PAGE *page)
 		WT_ERR(__rec_child_modify(session, r, ref, &hazard, &state));
 		addr = ref->addr;
 		child = ref->page;
-		vtype = 0;
 
 		/* Deleted child we don't have to write. */
 		if (state == WT_CHILD_IGNORE) {
@@ -4013,10 +4045,6 @@ __rec_row_int(WT_SESSION_IMPL *session, WT_RECONCILE *r, WT_PAGE *page)
 			CHILD_RELEASE_ERR(session, hazard, ref);
 			continue;
 		}
-
-		/* Deleted child requiring a proxy cell. */
-		if (state == WT_CHILD_PROXY)
-			vtype = WT_CELL_ADDR_DEL;
 
 		/*
 		 * Modified child.  Empty pages are merged into the parent and
@@ -4067,22 +4095,22 @@ __rec_row_int(WT_SESSION_IMPL *session, WT_RECONCILE *r, WT_PAGE *page)
 
 		/*
 		 * Build the value cell, the child page's address.  Addr points
-		 * to an on-page cell or an off-page WT_ADDR structure.   The
-		 * cell type has been set in the case of page deletion requiring
+		 * to an on-page cell or an off-page WT_ADDR structure. There's
+		 * a special cell type in the case of page deletion requiring
 		 * a proxy cell, otherwise use the information from the addr or
 		 * original cell.
 		 */
 		if (__wt_off_page(page, addr)) {
 			p = addr->addr;
 			size = addr->size;
-			if (vtype == 0)
-				vtype = __rec_vtype(addr);
+			vtype = state == WT_CHILD_PROXY ?
+			    WT_CELL_ADDR_DEL : __rec_vtype(addr);
 		} else {
 			__wt_cell_unpack(ref->addr, vpack);
 			p = vpack->data;
 			size = vpack->size;
-			if (vtype == 0)
-				vtype = vpack->raw;
+			vtype = state == WT_CHILD_PROXY ?
+			    WT_CELL_ADDR_DEL : (u_int)vpack->raw;
 		}
 		__rec_cell_build_addr(r, p, size, vtype, 0);
 		CHILD_RELEASE_ERR(session, hazard, ref);
@@ -4564,8 +4592,8 @@ leaf_insert:	/* Write any K/V pairs inserted into the page after this key. */
 	/* Write the remnant page. */
 	ret = __rec_split_finish(session, r);
 
-err:	__wt_scr_free(&tmpkey);
-	__wt_scr_free(&tmpval);
+err:	__wt_scr_free(session, &tmpkey);
+	__wt_scr_free(session, &tmpval);
 	return (ret);
 }
 
@@ -4919,7 +4947,7 @@ __rec_write_wrapup(WT_SESSION_IMPL *session, WT_RECONCILE *r, WT_PAGE *page)
 					break;
 				WT_ILLEGAL_VALUE_ERR(session);
 				}
-err:			__wt_scr_free(&tkey);
+err:			__wt_scr_free(session, &tkey);
 			WT_RET(ret);
 		}
 		if (r->bnd_next > r->bnd_next_max) {
@@ -5402,7 +5430,7 @@ __rec_cell_build_ovfl(WT_SESSION_IMPL *session,
 	kv->cell_len = __wt_cell_pack_ovfl(&kv->cell, type, rle, kv->buf.size);
 	kv->len = kv->cell_len + kv->buf.size;
 
-err:	__wt_scr_free(&tmp);
+err:	__wt_scr_free(session, &tmp);
 	return (ret);
 }
 

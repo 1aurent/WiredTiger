@@ -1,4 +1,5 @@
 /*-
+ * Copyright (c) 2014-2015 MongoDB, Inc.
  * Copyright (c) 2008-2014 WiredTiger, Inc.
  *	All rights reserved.
  *
@@ -72,7 +73,7 @@ struct __wt_cursor_lsm {
  * WT_LSM_CHUNK --
  *	A single chunk (file) in an LSM tree.
  */
-struct __wt_lsm_chunk {
+struct WT_COMPILER_TYPE_ALIGN(WT_CACHE_LINE_ALIGNMENT) __wt_lsm_chunk {
 	const char *uri;		/* Data source for this chunk */
 	const char *bloom_uri;		/* URI of Bloom filter, if any */
 	struct timespec create_ts;	/* Creation time (for rate limiting) */
@@ -100,7 +101,7 @@ struct __wt_lsm_chunk {
 #define	WT_LSM_CHUNK_ONDISK	0x04
 #define	WT_LSM_CHUNK_STABLE	0x08
 	uint32_t flags;
-} WT_GCC_ATTRIBUTE((aligned(WT_CACHE_LINE_ALIGNMENT)));
+};
 
 /*
  * Different types of work units. Used by LSM worker threads to choose which
@@ -192,8 +193,9 @@ struct __wt_lsm_tree {
 	/* Configuration parameters */
 	uint32_t bloom_bit_count;
 	uint32_t bloom_hash_count;
+	uint32_t chunk_count_limit;	/* Limit number of chunks */
 	uint64_t chunk_size;
-	uint64_t chunk_max;
+	uint64_t chunk_max;		/* Maximum chunk a merge creates */
 	u_int merge_min, merge_max;
 
 	u_int merge_idle;		/* Count of idle merge threads */
@@ -205,7 +207,7 @@ struct __wt_lsm_tree {
 
 	WT_LSM_CHUNK **chunk;		/* Array of active LSM chunks */
 	size_t chunk_alloc;		/* Space allocated for chunks */
-	u_int nchunks;			/* Number of active chunks */
+	uint32_t nchunks;		/* Number of active chunks */
 	uint32_t last;			/* Last allocated ID */
 	int modified;			/* Have there been updates? */
 
@@ -217,9 +219,10 @@ struct __wt_lsm_tree {
 
 #define	WT_LSM_TREE_ACTIVE		0x01	/* Workers are active */
 #define	WT_LSM_TREE_COMPACTING		0x02	/* Tree being compacted */
-#define	WT_LSM_TREE_NEED_SWITCH		0x04	/* New chunk needs creating */
-#define	WT_LSM_TREE_OPEN		0x08	/* The tree is open */
-#define	WT_LSM_TREE_THROTTLE		0x10	/* Throttle updates */
+#define	WT_LSM_TREE_MERGES		0x04	/* Tree should run merges */
+#define	WT_LSM_TREE_NEED_SWITCH		0x08	/* New chunk needs creating */
+#define	WT_LSM_TREE_OPEN		0x10	/* The tree is open */
+#define	WT_LSM_TREE_THROTTLE		0x20	/* Throttle updates */
 	uint32_t flags;
 };
 

@@ -82,8 +82,12 @@ or logged:
 @section statistics_log Statistics logging
 
 WiredTiger will optionally log database statistics into a file when the
-the ::wiredtiger_open \c statistics_log configuration is set.  The
-following example logs statistics every 30 seconds:
+the ::wiredtiger_open \c statistics_log configuration is set.
+
+The resulting statistics can be displayed using the \c wtstats visualization
+tool.  For more information, see @ref_single wtstats.
+
+The following example logs statistics every 30 seconds:
 
 @snippet ex_all.c Statistics logging
 
@@ -152,5 +156,9 @@ A Python script that parses the default logging output and uses the
 <a href="http://www.gnuplot.info/">gnuplot</a>, utility to generate
 Portable Network Graphics (PNG) format graphs is included in the
 WiredTiger distribution in the file \c tools/statlog.py.
+
+@m_if{c}
+To interactively examine statistics results, see @ref wtstats.
+@m_endif
 
 */

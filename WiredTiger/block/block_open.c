@@ -1,4 +1,5 @@
 /*-
+ * Copyright (c) 2014-2015 MongoDB, Inc.
  * Copyright (c) 2008-2014 WiredTiger, Inc.
  *	All rights reserved.
  *
@@ -27,7 +28,13 @@ __wt_block_manager_truncate(
 	WT_ERR(__wt_ftruncate(session, fh, (wt_off_t)0));
 
 	/* Write out the file's meta-data. */
-	ret = __wt_desc_init(session, fh, allocsize);
+	WT_ERR(__wt_desc_init(session, fh, allocsize));
+
+	/*
+	 * Ensure the truncated file has made it to disk, then the upper-level
+	 * is never surprised.
+	 */
+	WT_ERR(__wt_fsync(session, fh));
 
 	/* Close the file handle. */
 err:	WT_TRET(__wt_close(session, fh));
@@ -52,6 +59,12 @@ __wt_block_manager_create(
 
 	/* Write out the file's meta-data. */
 	ret = __wt_desc_init(session, fh, allocsize);
+
+	/*
+	 * Ensure the truncated file has made it to disk, then the upper-level
+	 * is never surprised.
+	 */
+	WT_TRET(__wt_fsync(session, fh));
 
 	/* Close the file handle. */
 	WT_TRET(__wt_close(session, fh));
@@ -82,9 +95,11 @@ __block_destroy(WT_SESSION_IMPL *session, WT_BLOCK *block)
 {
 	WT_CONNECTION_IMPL *conn;
 	WT_DECL_RET;
+	uint64_t bucket;
 
 	conn = S2C(session);
-	TAILQ_REMOVE(&conn->blockqh, block, q);
+	bucket = block->name_hash % WT_HASH_ARRAY_SIZE;
+	WT_CONN_BLOCK_REMOVE(conn, block, bucket);
 
 	if (block->name != NULL)
 		__wt_free(session, block->name);
@@ -112,27 +127,31 @@ __wt_block_open(WT_SESSION_IMPL *session,
 	WT_CONFIG_ITEM cval;
 	WT_CONNECTION_IMPL *conn;
 	WT_DECL_RET;
+	uint64_t bucket, hash;
 
 	WT_TRET(__wt_verbose(session, WT_VERB_BLOCK, "open: %s", filename));
 
 	conn = S2C(session);
 	*blockp = NULL;
-
+	hash = __wt_hash_city64(filename, strlen(filename));
+	bucket = hash % WT_HASH_ARRAY_SIZE;
 	__wt_spin_lock(session, &conn->block_lock);
-	TAILQ_FOREACH(block, &conn->blockqh, q)
+	SLIST_FOREACH(block, &conn->blockhash[bucket], hashl) {
 		if (strcmp(filename, block->name) == 0) {
 			++block->ref;
 			*blockp = block;
 			__wt_spin_unlock(session, &conn->block_lock);
 			return (0);
 		}
+	}
 
 	/* Basic structure allocation, initialization. */
 	WT_ERR(__wt_calloc_one(session, &block));
 	block->ref = 1;
-	TAILQ_INSERT_HEAD(&conn->blockqh, block, q);
+	WT_CONN_BLOCK_INSERT(conn, block, bucket);
 
 	WT_ERR(__wt_strdup(session, filename, &block->name));
+	block->name_hash = hash;
 	block->allocsize = allocsize;
 
 	WT_ERR(__wt_config_gets(session, cfg, "block_allocation", &cval));
@@ -254,7 +273,7 @@ __wt_desc_init(WT_SESSION_IMPL *session, WT_FH *fh, uint32_t allocsize)
 
 	ret = __wt_write(session, fh, (wt_off_t)0, (size_t)allocsize, desc);
 
-	__wt_scr_free(&buf);
+	__wt_scr_free(session, &buf);
 	return (ret);
 }
 
@@ -312,7 +331,7 @@ __desc_read(WT_SESSION_IMPL *session, WT_BLOCK *block)
 		    WT_BLOCK_MAJOR_VERSION, WT_BLOCK_MINOR_VERSION,
 		    desc->majorv, desc->minorv);
 
-err:	__wt_scr_free(&buf);
+err:	__wt_scr_free(session, &buf);
 	return (ret);
 }
 

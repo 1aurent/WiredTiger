@@ -1,6 +1,7 @@
 personal_ws-1.1 en 200
 ACM
 APIs
+ActiveState
 Adler's
 Atomicity
 BLOBs
@@ -51,6 +52,7 @@ MERCHANTABILITY
 MVCC's
 Makefiles
 Mewhort
+MongoDB
 Multithreaded
 NOTFOUND
 NUMA
@@ -64,11 +66,11 @@ Riak
 RocksDB
 Roelofs
 Rrx
+SCons
 Seward's
 SiH
 TXT
 URIs
-Vv
 WiredTiger
 WiredTiger's
 WiredTigerCheckpoint
@@ -76,6 +78,7 @@ WiredTigerException
 WiredTigerLog
 WiredTigerPanicException
 WiredTigerRollbackException
+WiredTigerStat
 WiredTigerTestCase
 Za
 aR
@@ -146,6 +149,7 @@ dNOff
 dT
 dataN
 dataitem
+dataset
 datasets
 datastore
 dbc
@@ -160,6 +164,7 @@ destructors
 dev
 distclean
 dl
+dll
 dlp
 dontlock
 dp
@@ -180,6 +185,7 @@ env
 eof
 erlang
 errno
+exe
 fadvise
 failchk
 fd's
@@ -227,6 +233,7 @@ io
 ip
 je
 jemalloc
+jitter
 jni
 jrx
 json
@@ -267,6 +274,7 @@ maxintlpage
 maxleafitem
 maxleafpage
 md
+mem
 memalloc
 memfree
 memp
@@ -317,6 +325,8 @@ oltp
 oob
 optype
 os
+outlier
+outliers
 ovfl
 pareto
 pcoll
@@ -342,6 +352,7 @@ putValue
 putValueString
 py
 qnx
+rVv
 rdbms
 rdlock
 readlock
@@ -370,6 +381,7 @@ sHq
 scalable
 scanf
 schemas
+scons
 selectable
 seqname
 seqno
@@ -392,6 +404,7 @@ structs
 subdatabases
 subdirectory
 subpage
+substring
 superset
 sys
 sz
@@ -405,8 +418,10 @@ timestamp
 timestamps
 todo
 toolchain
+touchpad
 tpc
 tpcb
+trackpad
 transactional
 transactionally
 tt
@@ -442,6 +457,7 @@ writelock
 writelocks
 wrlock
 wtperf
+wtstats
 xa
 yieldcpu
 zlib

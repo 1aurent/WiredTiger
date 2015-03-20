@@ -1,4 +1,5 @@
 /*-
+ * Copyright (c) 2014-2015 MongoDB, Inc.
  * Copyright (c) 2008-2014 WiredTiger, Inc.
  *	All rights reserved.
  *
@@ -327,42 +328,6 @@ __curstat_conn_init(WT_SESSION_IMPL *session, WT_CURSOR_STAT *cst)
 }
 
 /*
- * When returning the statistics for a file URI, we review open handles, and
- * aggregate checkpoint handle statistics with the file URI statistics.  To
- * make that work, we have to pass information to the function reviewing the
- * handles, this structure is what we pass.
- */
-struct __checkpoint_args {
-	const char *name;		/* Data source handle name */
-	WT_DSRC_STATS *stats;		/* Stat structure being filled */
-	int clear;			/* WT_STATISTICS_CLEAR */
-};
-
-/*
- * __curstat_checkpoint --
- *	Aggregate statistics from checkpoint handles.
- */
-static int
-__curstat_checkpoint(WT_SESSION_IMPL *session, const char *cfg[])
-{
-	struct __checkpoint_args *args;
-	WT_DATA_HANDLE *dhandle;
-
-	dhandle = session->dhandle;
-	args = (struct __checkpoint_args *)cfg[0];
-
-	/* Aggregate the flagged file's checkpoint handles. */
-	if (dhandle->checkpoint != NULL &&
-	    strcmp(dhandle->name, args->name) == 0) {
-		__wt_stat_aggregate_dsrc_stats(&dhandle->stats, args->stats);
-		if (args->clear)
-			__wt_stat_refresh_dsrc_stats(&dhandle->stats);
-	}
-
-	return (0);
-}
-
-/*
  * __curstat_file_init --
  *	Initialize the statistics for a file.
  */
@@ -370,10 +335,8 @@ static int
 __curstat_file_init(WT_SESSION_IMPL *session,
     const char *uri, const char *cfg[], WT_CURSOR_STAT *cst)
 {
-	struct __checkpoint_args args;
-	WT_DATA_HANDLE *dhandle, *saved_dhandle;
+	WT_DATA_HANDLE *dhandle;
 	WT_DECL_RET;
-	const char *cfg_arg[] = { NULL, NULL };
 
 	WT_RET(__wt_session_get_btree_ckpt(session, uri, cfg, 0));
 	dhandle = session->dhandle;
@@ -392,28 +355,6 @@ __curstat_file_init(WT_SESSION_IMPL *session,
 	/* Release the handle, we're done with it. */
 	WT_TRET(__wt_session_release_btree(session));
 	WT_RET(ret);
-
-	/*
-	 * If no checkpoint was specified, review the open handles and aggregate
-	 * the statistics from any checkpoint handles matching this file.
-	 */
-	if (dhandle->checkpoint == NULL) {
-		args.name = dhandle->name;
-		args.stats = &cst->u.dsrc_stats;
-		args.clear = F_ISSET(cst, WT_CONN_STAT_CLEAR);
-		cfg_arg[0] = (char *)&args;
-
-		/*
-		 * We're likely holding the handle lock inside the statistics
-		 * logging thread, not to mention calling __wt_conn_btree_apply
-		 * from there as well.  Save/restore the handle.
-		 */
-		saved_dhandle = dhandle;
-		WT_WITH_DHANDLE_LOCK(session,
-		    ret = __wt_conn_btree_apply(
-		    session, 1, dhandle->name, __curstat_checkpoint, cfg_arg));
-		session->dhandle = saved_dhandle;
-	}
 
 	return (ret);
 }
@@ -484,6 +425,7 @@ __wt_curstat_open(WT_SESSION_IMPL *session,
 	    __curstat_set_key,		/* set-key */
 	    __curstat_set_value,	/* set-value */
 	    __wt_cursor_notsup,		/* compare */
+	    __wt_cursor_notsup,		/* equals */
 	    __curstat_next,		/* next */
 	    __curstat_prev,		/* prev */
 	    __curstat_reset,		/* reset */
@@ -492,6 +434,7 @@ __wt_curstat_open(WT_SESSION_IMPL *session,
 	    __wt_cursor_notsup,		/* insert */
 	    __wt_cursor_notsup,		/* update */
 	    __wt_cursor_notsup,		/* remove */
+	    __wt_cursor_notsup,		/* reconfigure */
 	    __curstat_close);		/* close */
 	WT_CONFIG_ITEM cval, sval;
 	WT_CURSOR *cursor;

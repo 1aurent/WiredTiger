@@ -1,4 +1,5 @@
 /*-
+ * Copyright (c) 2014-2015 MongoDB, Inc.
  * Copyright (c) 2008-2014 WiredTiger, Inc.
  *	All rights reserved.
  *
@@ -6,7 +7,12 @@
  */
 
 /* Add GCC-specific attributes to types and function declarations. */
-#define	WT_GCC_ATTRIBUTE(x)	__attribute__(x)
+#define	WT_COMPILER_TYPE_ALIGN(x)	__attribute__((aligned(x)))
+
+#define	WT_PACKED_STRUCT_BEGIN(name)					\
+	struct __attribute__ ((__packed__)) name {
+#define	WT_PACKED_STRUCT_END						\
+	};
 
 /*
  * Attribute are only permitted on function declarations, not definitions.
@@ -14,6 +20,7 @@
  * dist/s_prototypes to create extern.h.
  */
 #define	WT_GCC_FUNC_ATTRIBUTE(x)
+#define	WT_GCC_FUNC_DECL_ATTRIBUTE(x) __attribute__(x)
 
 /*
  * Atomic writes:

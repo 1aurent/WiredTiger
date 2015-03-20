@@ -1,4 +1,5 @@
 /*-
+ * Copyright (c) 2014-2015 MongoDB, Inc.
  * Copyright (c) 2008-2014 WiredTiger, Inc.
  *	All rights reserved.
  *
@@ -44,7 +45,9 @@
 
 struct __wt_fh {
 	char	*name;				/* File name */
-	TAILQ_ENTRY(__wt_fh) q;			/* List of open handles */
+	uint64_t name_hash;			/* Hash of name */
+	SLIST_ENTRY(__wt_fh) l;			/* List of open handles */
+	SLIST_ENTRY(__wt_fh) hashl;		/* Hashed list of handles */
 
 	u_int	ref;				/* Reference count */
 

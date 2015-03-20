@@ -1,4 +1,5 @@
 /*-
+ * Copyright (c) 2014-2015 MongoDB, Inc.
  * Copyright (c) 2008-2014 WiredTiger, Inc.
  *	All rights reserved.
  *
@@ -15,8 +16,10 @@ int
 __wt_thread_create(WT_SESSION_IMPL *session,
     wt_thread_t *tidret, void *(*func)(void *), void *arg)
 {
+	typedef unsigned(__stdcall *start_address)(void *);
+
 	/* Spawn a new thread of control. */
-	*tidret = CreateThread(NULL, 0, func, arg, 0, NULL);
+	*tidret = _beginthreadex(NULL, 0, (start_address)func, arg, 0, NULL);
 	if (*tidret != NULL)
 		return (0);
 
@@ -32,10 +35,19 @@ __wt_thread_join(WT_SESSION_IMPL *session, wt_thread_t tid)
 {
 	WT_DECL_RET;
 
-	if ((ret = WaitForSingleObject(tid, INFINITE)) == WAIT_OBJECT_0)
-		return (0);
+	if ((ret = WaitForSingleObject(tid, INFINITE)) != WAIT_OBJECT_0)
+		/*
+		 * If we fail to wait, we will leak handles so do not continue
+		 */
+		WT_PANIC_RET(session, ret == WAIT_FAILED ? __wt_errno() : ret,
+		    "Wait for thread join failed");
 
-	WT_RET_MSG(session, ret, "WaitForSingleObject");
+	if (CloseHandle(tid) == 0) {
+		WT_RET_MSG(session, __wt_errno(),
+		    "CloseHandle: thread join");
+	}
+
+	return (0);
 }
 
 /*

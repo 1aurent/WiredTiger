@@ -1,4 +1,5 @@
 /*-
+ * Copyright (c) 2014-2015 MongoDB, Inc.
  * Copyright (c) 2008-2014 WiredTiger, Inc.
  *	All rights reserved.
  *
@@ -180,7 +181,7 @@ __statlog_dump(WT_SESSION_IMPL *session, const char *name, int conn_stats)
 		break;
 	}
 
-err:	__wt_scr_free(&tmp);
+err:	__wt_scr_free(session, &tmp);
 	return (ret);
 }
 
@@ -192,6 +193,7 @@ static int
 __statlog_apply(WT_SESSION_IMPL *session, const char *cfg[])
 {
 	WT_DATA_HANDLE *dhandle;
+	WT_DECL_RET;
 	char **p;
 
 	WT_UNUSED(cfg);
@@ -200,8 +202,11 @@ __statlog_apply(WT_SESSION_IMPL *session, const char *cfg[])
 
 	/* Check for a match on the set of sources. */
 	for (p = S2C(session)->stat_sources; *p != NULL; ++p)
-		if (WT_PREFIX_MATCH(dhandle->name, *p))
-			return (__statlog_dump(session, dhandle->name, 0));
+		if (WT_PREFIX_MATCH(dhandle->name, *p)) {
+			WT_WITHOUT_DHANDLE(session,
+			    ret = __statlog_dump(session, dhandle->name, 0));
+			WT_RET(ret);
+		}
 	return (0);
 }
 
@@ -371,7 +376,7 @@ __wt_statlog_log_one(WT_SESSION_IMPL *session)
 	WT_RET(__wt_scr_alloc(session, strlen(conn->stat_path) + 128, &tmp));
 	WT_ERR(__statlog_log_one(session, NULL, tmp));
 
-err:	__wt_scr_free(&tmp);
+err:	__wt_scr_free(session, &tmp);
 	return (ret);
 }
 
@@ -405,12 +410,12 @@ __statlog_server(void *arg)
 
 	while (F_ISSET(conn, WT_CONN_SERVER_RUN) &&
 	    F_ISSET(conn, WT_CONN_SERVER_STATISTICS)) {
-		if (!FLD_ISSET(conn->stat_flags, WT_CONN_STAT_NONE))
-			WT_ERR(__statlog_log_one(session, &path, &tmp));
-
 		/* Wait until the next event. */
 		WT_ERR(
 		    __wt_cond_wait(session, conn->stat_cond, conn->stat_usecs));
+
+		if (!FLD_ISSET(conn->stat_flags, WT_CONN_STAT_NONE))
+			WT_ERR(__statlog_log_one(session, &path, &tmp));
 	}
 
 	if (0) {

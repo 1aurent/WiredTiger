@@ -1,4 +1,5 @@
 /*-
+ * Copyright (c) 2014-2015 MongoDB, Inc.
  * Copyright (c) 2008-2014 WiredTiger, Inc.
  *	All rights reserved.
  *
@@ -20,7 +21,7 @@ static int  __inmem_row_leaf_entries(
  *	Check if a page matches the criteria for forced eviction.
  */
 static int
-__evict_force_check(WT_SESSION_IMPL *session, WT_PAGE *page)
+__evict_force_check(WT_SESSION_IMPL *session, WT_PAGE *page, uint32_t flags)
 {
 	WT_BTREE *btree;
 
@@ -31,13 +32,11 @@ __evict_force_check(WT_SESSION_IMPL *session, WT_PAGE *page)
 		return (0);
 
 	/* Leaf pages only. */
-	if (page->type != WT_PAGE_COL_FIX &&
-	    page->type != WT_PAGE_COL_VAR &&
-	    page->type != WT_PAGE_ROW_LEAF)
+	if (WT_PAGE_IS_INTERNAL(page))
 		return (0);
 
-	/* Eviction may be turned off, although that's rare. */
-	if (F_ISSET(btree, WT_BTREE_NO_EVICTION))
+	/* Eviction may be turned off. */
+	if (LF_ISSET(WT_READ_NO_EVICT) || F_ISSET(btree, WT_BTREE_NO_EVICTION))
 		return (0);
 
 	/*
@@ -50,7 +49,8 @@ __evict_force_check(WT_SESSION_IMPL *session, WT_PAGE *page)
 	/* Trigger eviction on the next page release. */
 	__wt_page_evict_soon(page);
 
-	return (1);
+	/* If eviction cannot succeed, don't try. */
+	return (__wt_page_can_evict(session, page, 1));
 }
 
 /*
@@ -67,9 +67,10 @@ __wt_page_in_func(WT_SESSION_IMPL *session, WT_REF *ref, uint32_t flags
 {
 	WT_DECL_RET;
 	WT_PAGE *page;
+	u_int sleep_cnt, wait_cnt;
 	int busy, force_attempts, oldgen;
 
-	for (force_attempts = oldgen = 0;;) {
+	for (force_attempts = oldgen = 0, wait_cnt = 0;;) {
 		switch (ref->state) {
 		case WT_REF_DISK:
 		case WT_REF_DELETED:
@@ -88,11 +89,14 @@ __wt_page_in_func(WT_SESSION_IMPL *session, WT_REF *ref, uint32_t flags
 		case WT_REF_READING:
 			if (LF_ISSET(WT_READ_CACHE))
 				return (WT_NOTFOUND);
-			/* FALLTHROUGH */
+			if (LF_ISSET(WT_READ_NO_WAIT))
+				return (WT_NOTFOUND);
+			WT_STAT_FAST_CONN_INCR(session, page_read_blocked);
+			break;
 		case WT_REF_LOCKED:
 			if (LF_ISSET(WT_READ_NO_WAIT))
 				return (WT_NOTFOUND);
-			/* The page is busy -- wait. */
+			WT_STAT_FAST_CONN_INCR(session, page_locked_blocked);
 			break;
 		case WT_REF_SPLIT:
 			return (WT_RESTART);
@@ -109,19 +113,40 @@ __wt_page_in_func(WT_SESSION_IMPL *session, WT_REF *ref, uint32_t flags
 #else
 			WT_RET(__wt_hazard_set(session, ref, &busy));
 #endif
-			if (busy)
+			if (busy) {
+				WT_STAT_FAST_CONN_INCR(
+				    session, page_busy_blocked);
 				break;
+			}
 
 			page = ref->page;
 			WT_ASSERT(session, page != NULL);
 
-			/* Forcibly evict pages that are too big. */
-			if (!LF_ISSET(WT_READ_NO_EVICT) &&
-			    force_attempts < 10 &&
-			    __evict_force_check(session, page)) {
+			/*
+			 * Forcibly evict pages that are too big.
+			 */
+			if (force_attempts < 10 &&
+			    __evict_force_check(session, page, flags)) {
 				++force_attempts;
-				WT_RET(__wt_page_release(session, ref, flags));
-				break;
+				ret = __wt_page_release_evict(session, ref);
+				/* If forced eviction fails, stall. */
+				if (ret == EBUSY) {
+					ret = 0;
+					wait_cnt += 1000;
+					WT_STAT_FAST_CONN_INCR(session,
+					    page_forcible_evict_blocked);
+					break;
+				} else
+					WT_RET(ret);
+
+				/*
+				 * The result of a successful forced eviction
+				 * is a page-state transition (potentially to
+				 * an in-memory page we can use, or a restart
+				 * return for our caller), continue the outer
+				 * page-acquisition loop.
+				 */
+				continue;
 			}
 
 			/* Check if we need an autocommit transaction. */
@@ -148,8 +173,19 @@ __wt_page_in_func(WT_SESSION_IMPL *session, WT_REF *ref, uint32_t flags
 		WT_ILLEGAL_VALUE(session);
 		}
 
-		/* We failed to get the page -- yield before retrying. */
-		__wt_yield();
+		/*
+		 * We failed to get the page -- yield before retrying, and if
+		 * we've yielded enough times, start sleeping so we don't burn
+		 * CPU to no purpose.
+		 */
+		if (++wait_cnt < 1000)
+			__wt_yield();
+		else {
+			sleep_cnt = WT_MIN(wait_cnt, 10000);
+			wait_cnt *= 2;
+			WT_STAT_FAST_CONN_INCRV(session, page_sleep, sleep_cnt);
+			__wt_sleep(0, sleep_cnt);
+		}
 	}
 }
 
@@ -255,6 +291,7 @@ err:			if ((pindex = WT_INTL_INDEX_COPY(page)) != NULL) {
 
 	/* Increment the cache statistics. */
 	__wt_cache_page_inmem_incr(session, page, size);
+	(void)WT_ATOMIC_ADD8(cache->bytes_read, size);
 	(void)WT_ATOMIC_ADD8(cache->pages_inmem, 1);
 
 	*pagep = page;
@@ -622,7 +659,7 @@ __inmem_row_int(WT_SESSION_IMPL *session, WT_PAGE *page, size_t *sizep)
 		}
 	}
 
-err:	__wt_scr_free(&current);
+err:	__wt_scr_free(session, &current);
 	return (ret);
 }
 

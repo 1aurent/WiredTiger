@@ -1,4 +1,5 @@
 /*-
+ * Copyright (c) 2014-2015 MongoDB, Inc.
  * Copyright (c) 2008-2014 WiredTiger, Inc.
  *	All rights reserved.
  *
@@ -170,8 +171,6 @@ __clsm_enter(WT_CURSOR_LSM *clsm, int reset, int update)
 		    lsm_tree->nchunks != 0)
 			goto open;
 
-		WT_RET(__wt_cache_full_check(session));
-
 		if (clsm->dsk_gen != lsm_tree->dsk_gen &&
 		    lsm_tree->nchunks != 0)
 			goto open;
@@ -249,7 +248,7 @@ open:		WT_WITH_SCHEMA_LOCK(session,
  * __clsm_leave --
  *	Finish an operation on an LSM cursor.
  */
-static int
+static void
 __clsm_leave(WT_CURSOR_LSM *clsm)
 {
 	WT_SESSION_IMPL *session;
@@ -257,11 +256,9 @@ __clsm_leave(WT_CURSOR_LSM *clsm)
 	session = (WT_SESSION_IMPL *)clsm->iface.session;
 
 	if (F_ISSET(clsm, WT_CLSM_ACTIVE)) {
-		WT_RET(__cursor_leave(session));
+		__cursor_leave(session);
 		F_CLR(clsm, WT_CLSM_ACTIVE);
 	}
-
-	return (0);
 }
 
 /*
@@ -386,6 +383,7 @@ __clsm_open_cursors(
 	const char *checkpoint, *ckpt_cfg[3];
 	uint64_t saved_gen;
 	u_int i, nchunks, ngood, nupdates;
+	u_int close_range_end, close_range_start;
 	int locked;
 
 	c = &clsm->iface;
@@ -509,23 +507,33 @@ retry:	if (F_ISSET(clsm, WT_CLSM_MERGE)) {
 		}
 
 		/*
-		 * Close any cursors we no longer need.  If the cursor is a
-		 * pure update cursor, close everything -- we usually only need
-		 * a single chunk open in that case and we haven't walked all
-		 * of the other slots in the loop above.
+		 * Close any cursors we no longer need.
 		 *
 		 * Drop the LSM tree lock while we do this: if the cache is
 		 * full, we may block while closing a cursor.  Save the
 		 * generation number and retry if it has changed under us.
 		 */
-		if (!F_ISSET(clsm, WT_CLSM_OPEN_READ) && nupdates > 0)
-			ngood = 0;
 		if (clsm->cursors != NULL && ngood < clsm->nchunks) {
+			close_range_start = ngood;
+			close_range_end = clsm->nchunks;
+		} else if (!F_ISSET(clsm, WT_CLSM_OPEN_READ) && nupdates > 0 ) {
+			close_range_start = 0;
+			close_range_end = WT_MIN(nchunks, clsm->nchunks);
+			if (close_range_end > nupdates)
+				close_range_end -= nupdates;
+			else
+				close_range_end = 0;
+			WT_ASSERT(session, ngood >= close_range_end);
+		} else {
+			close_range_end = 0;
+			close_range_start = 0;
+		}
+		if (close_range_end > close_range_start) {
 			saved_gen = lsm_tree->dsk_gen;
 			locked = 0;
 			WT_ERR(__wt_lsm_tree_readunlock(session, lsm_tree));
 			WT_ERR(__clsm_close_cursors(
-			    clsm, ngood, clsm->nchunks));
+			    clsm, close_range_start, close_range_end));
 			WT_ERR(__wt_lsm_tree_readlock(session, lsm_tree));
 			locked = 1;
 			if (lsm_tree->dsk_gen != saved_gen)
@@ -838,7 +846,7 @@ retry:		/*
 	    deleted)
 		goto retry;
 
-err:	WT_TRET(__clsm_leave(clsm));
+err:	__clsm_leave(clsm);
 	API_END(session, ret);
 	if (ret == 0)
 		__clsm_deleted_decode(clsm, &cursor->value);
@@ -926,7 +934,7 @@ retry:		/*
 	    deleted)
 		goto retry;
 
-err:	WT_TRET(__clsm_leave(clsm));
+err:	__clsm_leave(clsm);
 	API_END(session, ret);
 	if (ret == 0)
 		__clsm_deleted_decode(clsm, &cursor->value);
@@ -987,7 +995,7 @@ __clsm_reset(WT_CURSOR *cursor)
 	WT_TRET(__clsm_reset_cursors(clsm, NULL));
 
 	/* In case we were left positioned, clear that. */
-	WT_TRET(__clsm_leave(clsm));
+	__clsm_leave(clsm);
 
 err:	API_END_RET(session, ret);
 }
@@ -1085,7 +1093,7 @@ __clsm_search(WT_CURSOR *cursor)
 
 	ret = __clsm_lookup(clsm, &cursor->value);
 
-err:	WT_TRET(__clsm_leave(clsm));
+err:	__clsm_leave(clsm);
 	API_END(session, ret);
 	if (ret == 0)
 		__clsm_deleted_decode(clsm, &cursor->value);
@@ -1204,7 +1212,7 @@ __clsm_search_near(WT_CURSOR *cursor, int *exactp)
 	}
 	*exactp = cmp;
 
-err:	WT_TRET(__clsm_leave(clsm));
+err:	__clsm_leave(clsm);
 	API_END(session, ret);
 	if (closest != NULL)
 		WT_TRET(closest->reset(closest));
@@ -1314,8 +1322,8 @@ __clsm_insert(WT_CURSOR *cursor)
 	WT_ERR(__clsm_deleted_encode(session, &cursor->value, &value, &buf));
 	ret = __clsm_put(session, clsm, &cursor->key, &value, 0);
 
-err:	__wt_scr_free(&buf);
-	WT_TRET(__clsm_leave(clsm));
+err:	__wt_scr_free(session, &buf);
+	__clsm_leave(clsm);
 	CURSOR_UPDATE_API_END(session, ret);
 	return (ret);
 }
@@ -1347,8 +1355,8 @@ __clsm_update(WT_CURSOR *cursor)
 		ret = __clsm_put(session, clsm, &cursor->key, &value, 1);
 	}
 
-err:	__wt_scr_free(&buf);
-	WT_TRET(__clsm_leave(clsm));
+err:	__wt_scr_free(session, &buf);
+	__clsm_leave(clsm);
 	CURSOR_UPDATE_API_END(session, ret);
 	return (ret);
 }
@@ -1376,7 +1384,7 @@ __clsm_remove(WT_CURSOR *cursor)
 	    (ret = __clsm_lookup(clsm, &value)) == 0)
 		ret = __clsm_put(session, clsm, &cursor->key, &__tombstone, 1);
 
-err:	WT_TRET(__clsm_leave(clsm));
+err:	__clsm_leave(clsm);
 	CURSOR_UPDATE_API_END(session, ret);
 	return (ret);
 }
@@ -1404,7 +1412,7 @@ __clsm_close(WT_CURSOR *cursor)
 	__wt_free(session, clsm->switch_txn);
 
 	/* In case we were somehow left positioned, clear that. */
-	WT_TRET(__clsm_leave(clsm));
+	__clsm_leave(clsm);
 
 	/* The WT_LSM_TREE owns the URI. */
 	cursor->uri = NULL;
@@ -1430,6 +1438,7 @@ __wt_clsm_open(WT_SESSION_IMPL *session,
 	    __wt_cursor_set_key,	/* set-key */
 	    __wt_cursor_set_value,	/* set-value */
 	    __clsm_compare,		/* compare */
+	    __wt_cursor_equals,		/* equals */
 	    __clsm_next,		/* next */
 	    __clsm_prev,		/* prev */
 	    __clsm_reset,		/* reset */
@@ -1438,6 +1447,7 @@ __wt_clsm_open(WT_SESSION_IMPL *session,
 	    __clsm_insert,		/* insert */
 	    __clsm_update,		/* update */
 	    __clsm_remove,		/* remove */
+	    __wt_cursor_reconfigure,	/* reconfigure */
 	    __clsm_close);		/* close */
 	WT_CURSOR *cursor;
 	WT_CURSOR_LSM *clsm;
@@ -1469,8 +1479,6 @@ __wt_clsm_open(WT_SESSION_IMPL *session,
 	cursor->key_format = lsm_tree->key_format;
 	cursor->value_format = lsm_tree->value_format;
 
-	WT_ERR(__wt_cursor_config_readonly(cursor, cfg, 0));
-
 	clsm->lsm_tree = lsm_tree;
 
 	/*
@@ -1483,11 +1491,8 @@ __wt_clsm_open(WT_SESSION_IMPL *session,
 	WT_ERR(__wt_cursor_init(cursor, cursor->uri, owner, cfg, cursorp));
 
 	if (0) {
-err:		__wt_lsm_tree_release(session, lsm_tree);
-		if (clsm != NULL) {
-			clsm->lsm_tree = NULL;
+err:		if (clsm != NULL)
 			WT_TRET(__clsm_close(cursor));
-		}
 	}
 
 	return (ret);

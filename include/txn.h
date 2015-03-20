@@ -1,4 +1,5 @@
 /*-
+ * Copyright (c) 2014-2015 MongoDB, Inc.
  * Copyright (c) 2008-2014 WiredTiger, Inc.
  *	All rights reserved.
  *
@@ -6,6 +7,7 @@
  */
 
 #define	WT_TXN_NONE	0		/* No txn running in a session. */
+#define	WT_TXN_FIRST	1		/* First transaction to run. */
 #define	WT_TXN_ABORTED	UINT64_MAX	/* Update rolled back, ignore. */
 
 /*
@@ -23,10 +25,10 @@
 
 #define	WT_SESSION_TXN_STATE(s) (&S2C(s)->txn_global.states[(s)->id])
 
-struct __wt_txn_state {
+struct WT_COMPILER_TYPE_ALIGN(WT_CACHE_LINE_ALIGNMENT) __wt_txn_state {
 	volatile uint64_t id;
 	volatile uint64_t snap_min;
-} WT_GCC_ATTRIBUTE((aligned(WT_CACHE_LINE_ALIGNMENT)));
+};
 
 struct __wt_txn_global {
 	volatile uint64_t current;	/* Current transaction ID. */

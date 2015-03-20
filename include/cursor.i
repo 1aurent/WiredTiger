@@ -1,4 +1,5 @@
 /*-
+ * Copyright (c) 2014-2015 MongoDB, Inc.
  * Copyright (c) 2008-2014 WiredTiger, Inc.
  *	All rights reserved.
  *
@@ -68,7 +69,7 @@ __cursor_enter(WT_SESSION_IMPL *session)
  * __cursor_leave --
  *	Deactivate a cursor.
  */
-static inline int
+static inline void
 __cursor_leave(WT_SESSION_IMPL *session)
 {
 	/*
@@ -79,8 +80,6 @@ __cursor_leave(WT_SESSION_IMPL *session)
 	WT_ASSERT(session, session->ncursors > 0);
 	if (--session->ncursors == 0)
 		__wt_txn_read_last(session);
-
-	return (0);
 }
 
 /*
@@ -112,7 +111,7 @@ __curfile_leave(WT_CURSOR_BTREE *cbt)
 
 	/* If the cursor was active, deactivate it. */
 	if (F_ISSET(cbt, WT_CBT_ACTIVE)) {
-		WT_RET(__cursor_leave(session));
+		__cursor_leave(session);
 		F_CLR(cbt, WT_CBT_ACTIVE);
 	}
 
@@ -163,8 +162,11 @@ __wt_cursor_dhandle_decr_use(WT_SESSION_IMPL *session)
 
 	dhandle = session->dhandle;
 
+	/* If we close a handle with a time of death set, clear it. */
 	WT_ASSERT(session, dhandle->session_inuse > 0);
-	(void)WT_ATOMIC_SUB4(dhandle->session_inuse, 1);
+	if (WT_ATOMIC_SUB4(dhandle->session_inuse, 1) == 0 &&
+	    dhandle->timeofdeath != 0)
+		dhandle->timeofdeath = 0;
 }
 
 /*
@@ -175,11 +177,23 @@ static inline int
 __cursor_func_init(WT_CURSOR_BTREE *cbt, int reenter)
 {
 	WT_SESSION_IMPL *session;
+	WT_TXN *txn;
 
 	session = (WT_SESSION_IMPL *)cbt->iface.session;
+	txn = &session->txn;
 
 	if (reenter)
 		WT_RET(__curfile_leave(cbt));
+
+	/*
+	 * If there is no transaction active in this thread and we haven't
+	 * checked if the cache is full, do it now.  If we have to block for
+	 * eviction, this is the best time to do it.
+	 */
+	if (F_ISSET(txn, TXN_RUNNING) &&
+	    !F_ISSET(txn, TXN_HAS_ID) && !F_ISSET(txn, TXN_HAS_SNAPSHOT))
+		WT_RET(__wt_cache_full_check(session));
+
 	if (!F_ISSET(cbt, WT_CBT_ACTIVE))
 		WT_RET(__curfile_enter(cbt));
 	__wt_txn_cursor_op(session);
