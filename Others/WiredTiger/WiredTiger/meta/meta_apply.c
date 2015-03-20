@@ -1,4 +1,5 @@
 /*-
+ * Copyright (c) 2014-2015 MongoDB, Inc.
  * Copyright (c) 2008-2014 WiredTiger, Inc.
  *	All rights reserved.
  *
@@ -42,7 +43,8 @@ __wt_meta_btree_apply(WT_SESSION_IMPL *session,
 		 */
 		ret = __wt_session_get_btree(session, uri, NULL, NULL, 0);
 		if (ret == 0) {
-			ret = func(session, cfg);
+			WT_SAVE_DHANDLE(session,
+			    ret = func(session, cfg));
 			if (WT_META_TRACKING(session))
 				WT_TRET(
 				    __wt_meta_track_handle_lock(session, 0));

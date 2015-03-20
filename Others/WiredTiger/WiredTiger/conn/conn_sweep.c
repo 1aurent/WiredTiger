@@ -1,4 +1,5 @@
 /*-
+ * Copyright (c) 2014-2015 MongoDB, Inc.
  * Copyright (c) 2008-2014 WiredTiger, Inc.
  *	All rights reserved.
  *
@@ -31,14 +32,14 @@ __sweep(WT_SESSION_IMPL *session)
 		dhandle_next = SLIST_NEXT(dhandle, l);
 		if (WT_IS_METADATA(dhandle))
 			continue;
-		if (dhandle->session_inuse == 0 && dhandle->timeofdeath == 0) {
+		if (dhandle->session_inuse != 0 ||
+		    now <= dhandle->timeofdeath + WT_DHANDLE_SWEEP_WAIT)
+			continue;
+		if (dhandle->timeofdeath == 0) {
 			dhandle->timeofdeath = now;
 			WT_STAT_FAST_CONN_INCR(session, dh_conn_tod);
 			continue;
 		}
-		if (dhandle->session_inuse != 0 ||
-		    now <= dhandle->timeofdeath + WT_DHANDLE_SWEEP_WAIT)
-			continue;
 
 		/*
 		 * We have a candidate for closing; if it's open, acquire an
@@ -117,7 +118,6 @@ __sweep_server(void *arg)
 	 */
 	while (F_ISSET(conn, WT_CONN_SERVER_RUN) &&
 	    F_ISSET(conn, WT_CONN_SERVER_SWEEP)) {
-
 		/* Wait until the next event. */
 		WT_ERR(__wt_cond_wait(session,
 		    conn->sweep_cond, WT_DHANDLE_SWEEP_PERIOD * WT_MILLION));

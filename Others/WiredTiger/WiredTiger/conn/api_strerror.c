@@ -3,18 +3,26 @@
 #include "wt_internal.h"
 
 /*
- * wiredtiger_strerror --
- *	Return a string for any error value.
+ * Historically, there was only the wiredtiger_strerror call because the POSIX
+ * port didn't need anything more complex; Windows requires memory allocation
+ * of error strings, so we added the WT_SESSION.strerror method. Because we
+ * want wiredtiger_strerror to continue to be as thread-safe as possible, errors
+ * are split into two categories: WiredTiger's or the system's constant strings
+ * and Everything Else, and we check constant strings before Everything Else.
+ */
+
+/*
+ * __wt_wiredtiger_error --
+ *	Return a constant string for WiredTiger POSIX-standard and errors.
  */
 const char *
-wiredtiger_strerror(int error)
+__wt_wiredtiger_error(int error)
 {
-	static char errbuf[64];
-	char *p;
+	const char *p;
 
-	if (error == 0)
-		return ("Successful return: 0");
-
+	/*
+	 * Check for WiredTiger specific errors.
+	 */
 	switch (error) {
 	case WT_ROLLBACK:
 		return ("WT_ROLLBACK: conflict between concurrent operations");
@@ -28,16 +36,30 @@ wiredtiger_strerror(int error)
 		return ("WT_PANIC: WiredTiger library panic");
 	case WT_RESTART:
 		return ("WT_RESTART: restart the operation (internal)");
-	default:
-		if (error > 0 && (p = strerror(error)) != NULL)
-			return (p);
-		break;
+	case WT_RUN_RECOVERY:
+		return ("WT_RUN_RECOVERY: recovery must be run to continue");
 	}
 
 	/*
-	 * !!!
-	 * Not thread-safe, but this is never supposed to happen.
+	 * POSIX errors are non-negative integers; check for 0 explicitly
+	 * in-case the underlying strerror doesn't handle 0, some don't.
 	 */
-	(void)snprintf(errbuf, sizeof(errbuf), "Unknown error: %d", error);
-	return (errbuf);
+	if (error == 0)
+		return ("Successful return: 0");
+	if (error > 0 && (p = strerror(error)) != NULL)
+		return (p);
+
+	return (NULL);
+}
+
+/*
+ * wiredtiger_strerror --
+ *	Return a string for any error value, non-thread-safe version.
+ */
+const char *
+wiredtiger_strerror(int error)
+{
+	static char buf[128];
+
+	return (__wt_strerror(NULL, error, buf, sizeof(buf)));
 }

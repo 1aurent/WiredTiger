@@ -1,4 +1,5 @@
 /*-
+ * Copyright (c) 2014-2015 MongoDB, Inc.
  * Copyright (c) 2008-2014 WiredTiger, Inc.
  *	All rights reserved.
  *
@@ -66,6 +67,20 @@ __wt_delete_page(WT_SESSION_IMPL *session, WT_REF *ref, int *skipp)
 	WT_PAGE *parent;
 
 	*skipp = 0;
+
+	/* If we have a clean page in memory, attempt to evict it. */
+	if (ref->state == WT_REF_MEM &&
+	    WT_ATOMIC_CAS4(ref->state, WT_REF_MEM, WT_REF_LOCKED)) {
+		if (__wt_page_is_modified(ref->page)) {
+			WT_PUBLISH(ref->state, WT_REF_MEM);
+			return (0);
+		}
+
+		(void)WT_ATOMIC_ADD4(S2BT(session)->evict_busy, 1);
+		ret = __wt_evict_page(session, ref);
+		(void)WT_ATOMIC_SUB4(S2BT(session)->evict_busy, 1);
+		WT_RET_BUSY_OK(ret);
+	}
 
 	/*
 	 * Atomically switch the page's state to lock it.  If the page is not
@@ -206,6 +221,9 @@ __wt_delete_page_skip(WT_SESSION_IMPL *session, WT_REF *ref)
 {
 	int skip;
 
+	if (ref->state != WT_REF_DELETED)
+		return (0);
+
 	/*
 	 * Deleted pages come from two sources: either it's a fast-delete as
 	 * described above, or the page has been emptied by other operations
@@ -224,11 +242,14 @@ __wt_delete_page_skip(WT_SESSION_IMPL *session, WT_REF *ref)
 	 * the page could switch to an in-memory state at any time.  Lock down
 	 * the structure, just to be safe.
 	 */
+	if (ref->page_del == NULL)
+		return (1);
+
 	if (!WT_ATOMIC_CAS4(ref->state, WT_REF_DELETED, WT_REF_LOCKED))
 		return (0);
 
-	skip = ref->page_del == NULL ||
-	    __wt_txn_visible(session, ref->page_del->txnid) ? 1 : 0;
+	skip = (ref->page_del == NULL ||
+	    __wt_txn_visible(session, ref->page_del->txnid));
 
 	WT_PUBLISH(ref->state, WT_REF_DELETED);
 	return (skip);

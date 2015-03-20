@@ -1,4 +1,5 @@
 /*-
+ * Copyright (c) 2014-2015 MongoDB, Inc.
  * Copyright (c) 2008-2014 WiredTiger, Inc.
  *	All rights reserved.
  *
@@ -60,7 +61,7 @@ __ckpt_server_config(WT_SESSION_IMPL *session, const char **cfg, int *startp)
 		conn->ckpt_config = p;
 	}
 
-err:	__wt_scr_free(&tmp);
+err:	__wt_scr_free(session, &tmp);
 	return (ret);
 }
 
@@ -82,14 +83,6 @@ __ckpt_server(void *arg)
 
 	while (F_ISSET(conn, WT_CONN_SERVER_RUN) &&
 	    F_ISSET(conn, WT_CONN_SERVER_CHECKPOINT)) {
-		/* Checkpoint the database. */
-		WT_ERR(wt_session->checkpoint(wt_session, conn->ckpt_config));
-
-		/* Reset. */
-		if (conn->ckpt_logsize) {
-			__wt_log_written_reset(session);
-			conn->ckpt_signalled = 0;
-		}
 		/*
 		 * Wait...
 		 * NOTE: If the user only configured logsize, then usecs
@@ -97,6 +90,23 @@ __ckpt_server(void *arg)
 		 */
 		WT_ERR(
 		    __wt_cond_wait(session, conn->ckpt_cond, conn->ckpt_usecs));
+
+		/* Checkpoint the database. */
+		WT_ERR(wt_session->checkpoint(wt_session, conn->ckpt_config));
+
+		/* Reset. */
+		if (conn->ckpt_logsize) {
+			__wt_log_written_reset(session);
+			conn->ckpt_signalled = 0;
+
+			/*
+			 * In case we crossed the log limit during the
+			 * checkpoint and the condition variable was already
+			 * signalled, do a tiny wait to clear it so we don't do
+			 * another checkpoint immediately.
+			 */
+			WT_ERR(__wt_cond_wait(session, conn->ckpt_cond, 1));
+		}
 	}
 
 	if (0) {

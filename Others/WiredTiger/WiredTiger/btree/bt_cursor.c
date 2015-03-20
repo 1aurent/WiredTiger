@@ -1,4 +1,5 @@
 /*-
+ * Copyright (c) 2014-2015 MongoDB, Inc.
  * Copyright (c) 2008-2014 WiredTiger, Inc.
  *	All rights reserved.
  *
@@ -781,7 +782,9 @@ __wt_btcur_next_random(WT_CURSOR_BTREE *cbt)
 
 	WT_RET(__cursor_func_init(cbt, 1));
 
-	WT_ERR(__wt_row_random(session, cbt));
+	WT_WITH_PAGE_INDEX(session,
+	    ret = __wt_row_random(session, cbt));
+	WT_ERR(ret);
 	if (__cursor_valid(cbt, &upd))
 		WT_ERR(__wt_kv_return(session, cbt, upd));
 	else
@@ -799,16 +802,19 @@ err:	if (ret != 0)
 int
 __wt_btcur_compare(WT_CURSOR_BTREE *a_arg, WT_CURSOR_BTREE *b_arg, int *cmpp)
 {
-	WT_BTREE *btree;
 	WT_CURSOR *a, *b;
 	WT_SESSION_IMPL *session;
 
 	a = (WT_CURSOR *)a_arg;
 	b = (WT_CURSOR *)b_arg;
-	btree = a_arg->btree;
 	session = (WT_SESSION_IMPL *)a->session;
 
-	switch (btree->type) {
+	/* Confirm both cursors reference the same object. */
+	if (a_arg->btree != b_arg->btree)
+		WT_RET_MSG(
+		    session, EINVAL, "Cursors must reference the same object");
+
+	switch (a_arg->btree->type) {
 	case BTREE_COL_FIX:
 	case BTREE_COL_VAR:
 		/*
@@ -825,7 +831,7 @@ __wt_btcur_compare(WT_CURSOR_BTREE *a_arg, WT_CURSOR_BTREE *b_arg, int *cmpp)
 		break;
 	case BTREE_ROW:
 		WT_RET(__wt_compare(
-		    session, btree->collator, &a->key, &b->key, cmpp));
+		    session, a_arg->btree->collator, &a->key, &b->key, cmpp));
 		break;
 	WT_ILLEGAL_VALUE(session);
 	}
@@ -836,7 +842,7 @@ __wt_btcur_compare(WT_CURSOR_BTREE *a_arg, WT_CURSOR_BTREE *b_arg, int *cmpp)
  * __cursor_equals --
  *	Return if two cursors reference the same row.
  */
-static int
+static inline int
 __cursor_equals(WT_CURSOR_BTREE *a, WT_CURSOR_BTREE *b)
 {
 	switch (a->btree->type) {
@@ -861,6 +867,43 @@ __cursor_equals(WT_CURSOR_BTREE *a, WT_CURSOR_BTREE *b)
 		if (a->slot == b->slot)
 			return (1);
 		break;
+	}
+	return (0);
+}
+
+/*
+ * __wt_btcur_equals --
+ *	Return an equality comparison between two cursors.
+ */
+int
+__wt_btcur_equals(
+    WT_CURSOR_BTREE *a_arg, WT_CURSOR_BTREE *b_arg, int *equalp)
+{
+	WT_CURSOR *a, *b;
+	WT_SESSION_IMPL *session;
+	int cmp;
+
+	a = (WT_CURSOR *)a_arg;
+	b = (WT_CURSOR *)b_arg;
+	session = (WT_SESSION_IMPL *)a->session;
+
+	/* Confirm both cursors reference the same object. */
+	if (a_arg->btree != b_arg->btree)
+		WT_RET_MSG(
+		    session, EINVAL, "Cursors must reference the same object");
+
+	/*
+	 * The reason for an equals method is because we can avoid doing
+	 * a full key comparison in some cases. If both cursors point into the
+	 * tree, take the fast path, otherwise fall back to the slower compare
+	 * method; in both cases, return 1 if the cursors are equal, 0 if they
+	 * are not.
+	 */
+	if (F_ISSET(a, WT_CURSTD_KEY_INT) && F_ISSET(b, WT_CURSTD_KEY_INT))
+		*equalp = __cursor_equals(a_arg, b_arg);
+	else {
+		WT_RET(__wt_btcur_compare(a_arg, b_arg, &cmp));
+		*equalp = (cmp == 0) ? 1 : 0;
 	}
 	return (0);
 }
@@ -893,32 +936,22 @@ __cursor_truncate(WT_SESSION_IMPL *session,
 	 * instantiated the end cursor, so we know that page is pinned in memory
 	 * and we can proceed without concern.
 	 */
-	if (start == NULL) {
-		do {
-			WT_RET(__wt_btcur_remove(stop));
-			for (;;) {
-				if ((ret = __wt_btcur_prev(stop, 1)) != 0)
-					break;
-				stop->compare = 0;	/* Exact match */
-				if ((ret = rmfunc(session, stop, 1)) != 0)
-					break;
-			}
-		} while (ret == WT_RESTART);
-	} else {
-		do {
-			WT_RET(__wt_btcur_remove(start));
-			for (;;) {
-				if (stop != NULL &&
-				    __cursor_equals(start, stop))
-					break;
-				if ((ret = __wt_btcur_next(start, 1)) != 0)
-					break;
-				start->compare = 0;	/* Exact match */
-				if ((ret = rmfunc(session, start, 1)) != 0)
-					break;
-			}
-		} while (ret == WT_RESTART);
-	}
+	do {
+		WT_RET(__wt_btcur_remove(start));
+		/*
+		 * Reset ret each time through so that we don't loop forever in
+		 * the cursor equals case.
+		 */
+		for (ret = 0;;) {
+			if (stop != NULL && __cursor_equals(start, stop))
+				break;
+			if ((ret = __wt_btcur_next(start, 1)) != 0)
+				break;
+			start->compare = 0;	/* Exact match */
+			if ((ret = rmfunc(session, start, 1)) != 0)
+				break;
+		}
+	} while (ret == WT_RESTART);
 
 	WT_RET_NOTFOUND_OK(ret);
 	return (0);
@@ -952,36 +985,24 @@ __cursor_truncate_fix(WT_SESSION_IMPL *session,
 	 * other thread of control; in that case, repeat the full search to
 	 * refresh the page's modification information.
 	 */
-	if (start == NULL) {
-		do {
-			WT_RET(__wt_btcur_remove(stop));
-			for (;;) {
-				if ((ret = __wt_btcur_prev(stop, 1)) != 0)
-					break;
-				stop->compare = 0;	/* Exact match */
-				value = (uint8_t *)stop->iface.value.data;
-				if (*value != 0 &&
-				    (ret = rmfunc(session, stop, 1)) != 0)
-					break;
-			}
-		} while (ret == WT_RESTART);
-	} else {
-		do {
-			WT_RET(__wt_btcur_remove(start));
-			for (;;) {
-				if (stop != NULL &&
-				    __cursor_equals(start, stop))
-					break;
-				if ((ret = __wt_btcur_next(start, 1)) != 0)
-					break;
-				start->compare = 0;	/* Exact match */
-				value = (uint8_t *)start->iface.value.data;
-				if (*value != 0 &&
-				    (ret = rmfunc(session, start, 1)) != 0)
-					break;
-			}
-		} while (ret == WT_RESTART);
-	}
+	do {
+		WT_RET(__wt_btcur_remove(start));
+		/*
+		 * Reset ret each time through so that we don't loop forever in
+		 * the cursor equals case.
+		 */
+		for (ret = 0;;) {
+			if (stop != NULL && __cursor_equals(start, stop))
+				break;
+			if ((ret = __wt_btcur_next(start, 1)) != 0)
+				break;
+			start->compare = 0;	/* Exact match */
+			value = (uint8_t *)start->iface.value.data;
+			if (*value != 0 &&
+			    (ret = rmfunc(session, start, 1)) != 0)
+				break;
+		}
+	} while (ret == WT_RESTART);
 
 	WT_RET_NOTFOUND_OK(ret);
 	return (0);
@@ -1004,9 +1025,15 @@ __wt_btcur_range_truncate(WT_CURSOR_BTREE *start, WT_CURSOR_BTREE *stop)
 	btree = cbt->btree;
 
 	/*
-	 * For recovery, we log the start and stop keys for a truncate
-	 * operation, not the individual records removed.  On the other hand,
-	 * for rollback we need to keep track of all the in-memory operations.
+	 * We always delete in a forward direction because it's faster, assert
+	 * our caller provided us with a start cursor.
+	 */
+	WT_ASSERT(session, start != NULL);
+
+	/*
+	 * For recovery, log the start and stop keys for a truncate operation,
+	 * not the individual records removed.  On the other hand, for rollback
+	 * we need to keep track of all the in-memory operations.
 	 *
 	 * We deal with this here by logging the truncate range first, then (in
 	 * the logging code) disabling writing of the in-memory remove records
@@ -1030,15 +1057,13 @@ __wt_btcur_range_truncate(WT_CURSOR_BTREE *start, WT_CURSOR_BTREE *stop)
 		 * fully instantiated when truncating row-store objects because
 		 * it's comparing page and/or skiplist positions, not keys. (Key
 		 * comparison would work, it's only that a key comparison would
-		 * be relatively expensive.  Column-store objects have record
-		 * number keys, so the key comparison is cheap.)  Cursors may
-		 * have only had their keys set, so we must ensure the cursors
-		 * are positioned in the tree.
+		 * be relatively expensive, especially with custom collators.
+		 * Column-store objects have record number keys, so the key
+		 * comparison is cheap.)  The session truncate code did cursor
+		 * searches when setting up the truncate so we're good to go: if
+		 * that ever changes, we'd need to do something here to ensure a
+		 * fully instantiated cursor.
 		 */
-		if (start != NULL)
-			WT_ERR(__wt_btcur_search(start));
-		if (stop != NULL)
-			WT_ERR(__wt_btcur_search(stop));
 		WT_ERR(__cursor_truncate(
 		    session, start, stop, __cursor_row_modify));
 		break;

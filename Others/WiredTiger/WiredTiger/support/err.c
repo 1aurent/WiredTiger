@@ -1,4 +1,5 @@
 /*-
+ * Copyright (c) 2014-2015 MongoDB, Inc.
  * Copyright (c) 2008-2014 WiredTiger, Inc.
  *	All rights reserved.
  *
@@ -405,6 +406,20 @@ __wt_ext_msg_printf(
 	ret = info_msg(session, fmt, ap);
 	va_end(ap);
 	return (ret);
+}
+
+/*
+ * __wt_ext_strerror --
+ *	Extension API call to return an error as a string.
+ */
+const char *
+__wt_ext_strerror(WT_EXTENSION_API *wt_api, WT_SESSION *wt_session, int error)
+{
+	if (wt_session == NULL)
+		wt_session = (WT_SESSION *)
+		    ((WT_CONNECTION_IMPL *)wt_api->conn)->default_session;
+
+	return (wt_session->strerror(wt_session, error));
 }
 
 /*

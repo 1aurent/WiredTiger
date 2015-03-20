@@ -1,4 +1,5 @@
 /*-
+ * Copyright (c) 2014-2015 MongoDB, Inc.
  * Copyright (c) 2008-2014 WiredTiger, Inc.
  *	All rights reserved.
  *
@@ -13,17 +14,25 @@
 #define	LOG_ALIGN		128
 #define	WT_LOG_SLOT_BUF_INIT_SIZE	64 * 1024
 
-#define	INIT_LSN(l)	do {						\
+#define	WT_INIT_LSN(l)	do {						\
 	(l)->file = 1;							\
 	(l)->offset = 0;						\
 } while (0)
 
-#define	ZERO_LSN(l)	do {						\
+#define	WT_MAX_LSN(l)	do {						\
+	(l)->file = UINT32_MAX;						\
+	(l)->offset = INT64_MAX;					\
+} while (0)
+
+#define	WT_ZERO_LSN(l)	do {						\
 	(l)->file = 0;							\
 	(l)->offset = 0;						\
 } while (0)
 
-#define	IS_INIT_LSN(l)	((l)->file == 1 && (l)->offset == 0)
+#define	WT_IS_INIT_LSN(l)						\
+	((l)->file == 1 && (l)->offset == 0)
+#define	WT_IS_MAX_LSN(l)						\
+	((l)->file == UINT32_MAX && (l)->offset == INT64_MAX)
 
 /*
  * Both of the macros below need to change if the content of __wt_lsn
@@ -37,11 +46,6 @@
     ((const uint8_t *)(data) + offsetof(WT_LOG_RECORD, record))
 #define	LOG_REC_SIZE(size)						\
     ((size) - offsetof(WT_LOG_RECORD, record))
-
-#define	MAX_LSN(l)	do {						\
-	(l)->file = UINT32_MAX;						\
-	(l)->offset = INT64_MAX;					\
-} while (0)
 
 /*
  * Compare 2 LSNs, return -1 if lsn0 < lsn1, 0 if lsn0 == lsn1
@@ -66,7 +70,7 @@
 #define	WT_LOG_SLOT_FREE	1
 #define	WT_LOG_SLOT_PENDING	2
 #define	WT_LOG_SLOT_READY	3
-typedef struct {
+typedef WT_COMPILER_TYPE_ALIGN(WT_CACHE_LINE_ALIGNMENT) struct {
 	int64_t	 slot_state;		/* Slot state */
 	uint64_t slot_group_size;	/* Group size */
 	int32_t	 slot_error;		/* Error value */
@@ -86,7 +90,7 @@ typedef struct {
 #define	SLOT_SYNC	0x08			/* Needs sync on release */
 #define	SLOT_SYNC_DIR	0x10			/* Directory sync on release */
 	uint32_t flags;			/* Flags */
-} WT_LOGSLOT WT_GCC_ATTRIBUTE((aligned(WT_CACHE_LINE_ALIGNMENT)));
+} WT_LOGSLOT;
 
 typedef struct {
 	WT_LOGSLOT	*slot;
@@ -131,6 +135,8 @@ typedef struct {
 
 	/* Notify any waiting threads when sync_lsn is updated. */
 	WT_CONDVAR	*log_sync_cond;
+	/* Notify any waiting threads when write_lsn is updated. */
+	WT_CONDVAR	*log_write_cond;
 
 	/*
 	 * Consolidation array information

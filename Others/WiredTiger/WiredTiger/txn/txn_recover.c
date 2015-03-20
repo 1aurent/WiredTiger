@@ -1,4 +1,5 @@
 /*-
+ * Copyright (c) 2014-2015 MongoDB, Inc.
  * Copyright (c) 2008-2014 WiredTiger, Inc.
  *	All rights reserved.
  *
@@ -45,10 +46,6 @@ __recovery_cursor(WT_SESSION_IMPL *session, WT_RECOVERY *r,
 	int metadata_op;
 
 	c = NULL;
-
-	/* Track the largest file ID we have seen. */
-	if (id > r->max_fileid)
-		r->max_fileid = id;
 
 	/*
 	 * Metadata operations have an id of 0.  Match operations based
@@ -312,6 +309,10 @@ __recovery_setup_file(WT_RECOVERY *r, const char *uri, const char *config)
 	WT_RET(__wt_config_getones(r->session, config, "id", &cval));
 	fileid = (uint32_t)cval.val;
 
+	/* Track the largest file ID we have seen. */
+	if (fileid > r->max_fileid)
+		r->max_fileid = fileid;
+
 	if (r->nfiles <= fileid) {
 		WT_RET(__wt_realloc_def(
 		    r->session, &r->file_alloc, fileid + 1, &r->files));
@@ -323,7 +324,7 @@ __recovery_setup_file(WT_RECOVERY *r, const char *uri, const char *config)
 	    __wt_config_getones(r->session, config, "checkpoint_lsn", &cval));
 	/* If there is checkpoint logged for the file, apply everything. */
 	if (cval.type != WT_CONFIG_ITEM_STRUCT)
-		INIT_LSN(&lsn);
+		WT_INIT_LSN(&lsn);
 	else if (sscanf(cval.str, "(%" PRIu32 ",%" PRIdMAX ")",
 	    &lsn.file, (intmax_t*)&lsn.offset) != 2)
 		WT_RET_MSG(r->session, EINVAL,
@@ -395,9 +396,7 @@ __recovery_file_scan(WT_RECOVERY *r)
 	}
 	WT_ERR_NOTFOUND_OK(ret);
 
-err:	if (r->nfiles > r->max_fileid)
-		r->max_fileid = r->nfiles;
-	return (ret);
+err:	return (ret);
 }
 
 /*
@@ -405,18 +404,19 @@ err:	if (r->nfiles > r->max_fileid)
  *	Run recovery.
  */
 int
-__wt_txn_recover(WT_CONNECTION_IMPL *conn)
+__wt_txn_recover(WT_SESSION_IMPL *session)
 {
+	WT_CONNECTION_IMPL *conn;
 	WT_CURSOR *metac;
 	WT_DECL_RET;
 	WT_RECOVERY r;
-	WT_SESSION_IMPL *session;
 	struct WT_RECOVERY_FILE *metafile;
 	char *config;
-	int was_backup;
+	int needs_rec, was_backup;
 
+	conn = S2C(session);
 	WT_CLEAR(r);
-	INIT_LSN(&r.ckpt_lsn);
+	WT_INIT_LSN(&r.ckpt_lsn);
 	was_backup = F_ISSET(conn, WT_CONN_WAS_BACKUP) ? 1 : 0;
 
 	/* We need a real session for recovery. */
@@ -431,21 +431,38 @@ __wt_txn_recover(WT_CONNECTION_IMPL *conn)
 	metafile->c = metac;
 
 	/*
+	 * If no log was found (including if logging is disabled), or if the
+	 * last checkpoint was done with logging disabled, recovery should not
+	 * run.  Scan the metadata to figure out the largest file ID.
+	 */
+	if (!FLD_ISSET(S2C(session)->log_flags, WT_CONN_LOG_EXISTED) ||
+	    WT_IS_MAX_LSN(&metafile->ckpt_lsn)) {
+		WT_ERR(__recovery_file_scan(&r));
+		conn->next_file_id = r.max_fileid;
+		goto done;
+	}
+
+	/*
 	 * First, do a pass through the log to recover the metadata, and
 	 * establish the last checkpoint LSN.  Skip this when opening a hot
 	 * backup: we already have the correct metadata in that case.
 	 */
 	if (!was_backup) {
 		r.metadata_only = 1;
-		if (IS_INIT_LSN(&metafile->ckpt_lsn))
+		if (WT_IS_INIT_LSN(&metafile->ckpt_lsn))
 			WT_ERR(__wt_log_scan(session,
 			    NULL, WT_LOGSCAN_FIRST, __txn_log_recover, &r));
-		else
+		else {
+			/*
+			 * Start at the last checkpoint LSN referenced in the
+			 * metadata.  If we see the end of a checkpoint while
+			 * scanning, we will change the full scan to start from
+			 * there.
+			 */
+			r.ckpt_lsn = metafile->ckpt_lsn;
 			WT_ERR(__wt_log_scan(session,
 			    &metafile->ckpt_lsn, 0, __txn_log_recover, &r));
-
-		WT_ASSERT(session,
-		    LOG_CMP(&r.ckpt_lsn, &conn->log->first_lsn) >= 0);
+		}
 	}
 
 	/* Scan the metadata to find the live files and their IDs. */
@@ -466,14 +483,25 @@ __wt_txn_recover(WT_CONNECTION_IMPL *conn)
 	WT_ERR(__wt_verbose(session, WT_VERB_RECOVERY,
 	    "Main recovery loop: starting at %u/%" PRIuMAX,
 	    r.ckpt_lsn.file, (uintmax_t)r.ckpt_lsn.offset));
-	if (IS_INIT_LSN(&r.ckpt_lsn))
+	WT_ERR(__wt_log_needs_recovery(session, &r.ckpt_lsn, &needs_rec));
+	/*
+	 * Check if the database was shut down cleanly.  If not
+	 * return an error if the user does not want automatic
+	 * recovery.
+	 */
+	if (needs_rec && FLD_ISSET(conn->log_flags, WT_CONN_LOG_RECOVER_ERR))
+		WT_ERR(WT_RUN_RECOVERY);
+	/*
+	 * Always run recovery even if it was a clean shutdown.
+	 * We can consider skipping it in the future.
+	 */
+	if (WT_IS_INIT_LSN(&r.ckpt_lsn))
 		WT_ERR(__wt_log_scan(session, NULL,
 		    WT_LOGSCAN_FIRST | WT_LOGSCAN_RECOVER,
 		    __txn_log_recover, &r));
 	else
 		WT_ERR(__wt_log_scan(session, &r.ckpt_lsn,
-		    WT_LOGSCAN_RECOVER,
-		    __txn_log_recover, &r));
+		    WT_LOGSCAN_RECOVER, __txn_log_recover, &r));
 
 	conn->next_file_id = r.max_fileid;
 
@@ -484,6 +512,7 @@ __wt_txn_recover(WT_CONNECTION_IMPL *conn)
 	 */
 	WT_ERR(session->iface.checkpoint(&session->iface, "force=1"));
 
+done:
 err:	WT_TRET(__recovery_free(&r));
 	__wt_free(session, config);
 	WT_TRET(session->iface.close(&session->iface, NULL));

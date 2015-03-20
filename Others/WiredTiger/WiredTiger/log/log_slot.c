@@ -1,4 +1,5 @@
 /*-
+ * Copyright (c) 2014-2015 MongoDB, Inc.
  * Copyright (c) 2008-2014 WiredTiger, Inc.
  *	All rights reserved.
  *
@@ -202,8 +203,7 @@ retry:
 		 * churn is used to change how long we pause before closing
 		 * the slot - which leads to more consolidation and less churn.
 		 */
-		if (++switch_fails % SLOT_POOL == 0 &&
-		    switch_fails != 0 && slot->slot_churn < 5)
+		if (++switch_fails % SLOT_POOL == 0 && slot->slot_churn < 5)
 			++slot->slot_churn;
 		__wt_yield();
 		goto retry;
@@ -259,10 +259,16 @@ __wt_log_slot_notify(WT_SESSION_IMPL *session, WT_LOGSLOT *slot)
 int
 __wt_log_slot_wait(WT_SESSION_IMPL *session, WT_LOGSLOT *slot)
 {
+	int yield_count;
+
+	yield_count = 0;
 	WT_UNUSED(session);
 
 	while (slot->slot_state > WT_LOG_SLOT_DONE)
-		__wt_yield();
+		if (++yield_count < 1000)
+			__wt_yield();
+		else
+			__wt_sleep(0, 200);
 	return (0);
 }
 

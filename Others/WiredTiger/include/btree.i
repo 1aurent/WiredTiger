@@ -1,4 +1,5 @@
 /*-
+ * Copyright (c) 2014-2015 MongoDB, Inc.
  * Copyright (c) 2008-2014 WiredTiger, Inc.
  *	All rights reserved.
  *
@@ -16,6 +17,17 @@ __wt_ref_is_root(WT_REF *ref)
 }
 
 /*
+ * __wt_page_is_empty --
+ *	Return if the page is empty.
+ */
+static inline int
+__wt_page_is_empty(WT_PAGE *page)
+{
+	return (page->modify != NULL &&
+	    F_ISSET(page->modify, WT_PM_REC_MASK) == WT_PM_REC_EMPTY ? 1 : 0);
+}
+
+/*
  * __wt_page_is_modified --
  *	Return if the page is dirty.
  */
@@ -26,14 +38,6 @@ __wt_page_is_modified(WT_PAGE *page)
 }
 
 /*
- * Estimate the per-allocation overhead.  All implementations of malloc / free
- * have some kind of header and pad for alignment.  We can't know for sure what
- * that adds up to, but this is an estimate based on some measurements of heap
- * size versus bytes in use.
- */
-#define	WT_ALLOC_OVERHEAD	32U
-
-/*
  * __wt_cache_page_inmem_incr --
  *	Increment a page's memory footprint in the cache.
  */
@@ -42,7 +46,7 @@ __wt_cache_page_inmem_incr(WT_SESSION_IMPL *session, WT_PAGE *page, size_t size)
 {
 	WT_CACHE *cache;
 
-	size += WT_ALLOC_OVERHEAD;
+	WT_ASSERT(session, size < WT_EXABYTE);
 
 	cache = S2C(session)->cache;
 	(void)WT_ATOMIC_ADD8(cache->bytes_inmem, size);
@@ -50,6 +54,80 @@ __wt_cache_page_inmem_incr(WT_SESSION_IMPL *session, WT_PAGE *page, size_t size)
 	if (__wt_page_is_modified(page)) {
 		(void)WT_ATOMIC_ADD8(cache->bytes_dirty, size);
 		(void)WT_ATOMIC_ADD8(page->modify->bytes_dirty, size);
+	}
+}
+
+/* 
+ * WT_CACHE_DECR --
+ *	Macro to decrement a field by a size.
+ *
+ * Be defensive and don't underflow: a band-aid on a gaping wound, but underflow
+ * won't make things better no matter the problem (specifically, underflow makes
+ * eviction crazy trying to evict non-existent memory).
+ */
+#ifdef HAVE_DIAGNOSTIC
+#define	WT_CACHE_DECR(session, f, sz) do {				\
+	static int __first = 1;						\
+	if (WT_ATOMIC_SUB8(f, sz) > WT_EXABYTE) {			\
+		(void)WT_ATOMIC_ADD8(f, sz);				\
+		if (__first) {						\
+			__wt_errx(session,				\
+			    "%s underflow: decrementing %" WT_SIZET_FMT,\
+			    #f, sz);					\
+			__first = 0;					\
+		}							\
+	}								\
+} while (0)
+#else
+#define	WT_CACHE_DECR(s, f, sz) do {					\
+	if (WT_ATOMIC_SUB8(f, sz) > WT_EXABYTE)				\
+		(void)WT_ATOMIC_ADD8(f, sz);				\
+} while (0)
+#endif
+
+/*
+ * __wt_cache_page_byte_dirty_decr --
+ *	Decrement the page's dirty byte count, guarding from underflow.
+ */
+static inline void
+__wt_cache_page_byte_dirty_decr(
+    WT_SESSION_IMPL *session, WT_PAGE *page, size_t size)
+{
+	WT_CACHE *cache;
+	size_t decr, orig;
+	int i;
+
+	cache = S2C(session)->cache;
+
+	/*
+	 * We don't have exclusive access and there are ways of decrementing the
+	 * page's dirty byte count by a too-large value. For example:
+	 *	T1: __wt_cache_page_inmem_incr(page, size)
+	 *		page is clean, don't increment dirty byte count
+	 *	T2: mark page dirty
+	 *	T1: __wt_cache_page_inmem_decr(page, size)
+	 *		page is dirty, decrement dirty byte count
+	 * and, of course, the reverse where the page is dirty at the increment
+	 * and clean at the decrement.
+	 *
+	 * The page's dirty-byte value always reflects bytes represented in the
+	 * cache's dirty-byte count, decrement the page/cache as much as we can
+	 * without underflow. If we can't decrement the dirty byte counts after
+	 * few tries, give up: the cache's value will be wrong, but consistent,
+	 * and we'll fix it the next time this page is marked clean, or evicted.
+	 */
+	for (i = 0; i < 5; ++i) {
+		/*
+		 * Take care to read the dirty-byte count only once in case
+		 * we're racing with updates.
+		 */
+		orig = page->modify->bytes_dirty;
+		decr = WT_MIN(size, orig);
+		if (WT_ATOMIC_CAS8(
+		    page->modify->bytes_dirty, orig, orig - decr)) {
+			WT_CACHE_DECR(session, cache->bytes_dirty, decr);
+			break;
+		}
 	}
 }
 
@@ -62,20 +140,20 @@ __wt_cache_page_inmem_decr(WT_SESSION_IMPL *session, WT_PAGE *page, size_t size)
 {
 	WT_CACHE *cache;
 
-	size += WT_ALLOC_OVERHEAD;
-
 	cache = S2C(session)->cache;
-	(void)WT_ATOMIC_SUB8(cache->bytes_inmem, size);
-	(void)WT_ATOMIC_SUB8(page->memory_footprint, size);
-	if (__wt_page_is_modified(page)) {
-		(void)WT_ATOMIC_SUB8(cache->bytes_dirty, size);
-		(void)WT_ATOMIC_SUB8(page->modify->bytes_dirty, size);
-	}
+
+	WT_ASSERT(session, size < WT_EXABYTE);
+
+	WT_CACHE_DECR(session, cache->bytes_inmem, size);
+	WT_CACHE_DECR(session, page->memory_footprint, size);
+	if (__wt_page_is_modified(page))
+		__wt_cache_page_byte_dirty_decr(session, page, size);
 }
 
 /*
  * __wt_cache_dirty_incr --
- *	Increment the cache dirty page/byte counts.
+ *	Page switch from clean to dirty: increment the cache dirty page/byte
+ * counts.
  */
 static inline void
 __wt_cache_dirty_incr(WT_SESSION_IMPL *session, WT_PAGE *page)
@@ -97,42 +175,29 @@ __wt_cache_dirty_incr(WT_SESSION_IMPL *session, WT_PAGE *page)
 
 /*
  * __wt_cache_dirty_decr --
- *	Decrement the cache dirty page/byte counts.
+ *	Page switch from dirty to clean: decrement the cache dirty page/byte
+ * counts.
  */
 static inline void
 __wt_cache_dirty_decr(WT_SESSION_IMPL *session, WT_PAGE *page)
 {
 	WT_CACHE *cache;
-	size_t size;
+	WT_PAGE_MODIFY *modify;
 
 	cache = S2C(session)->cache;
 
 	if (cache->pages_dirty < 1) {
-		(void)__wt_errx(session,
-		   "cache dirty decrement failed: cache dirty page count went "
-		   "negative");
+		__wt_errx(session,
+		   "cache eviction dirty-page decrement failed: dirty page"
+		   "count went negative");
 		cache->pages_dirty = 0;
 	} else
 		(void)WT_ATOMIC_SUB8(cache->pages_dirty, 1);
 
-	/*
-	 * It is possible to decrement the footprint of the page without making
-	 * the page dirty (for example when freeing an obsolete update list),
-	 * so the footprint could change between read and decrement, and we
-	 * might attempt to decrement by a different amount than the bytes held
-	 * by the page.
-	 *
-	 * We catch that by maintaining a per-page dirty size, and fixing the
-	 * cache stats if that is non-zero when the page is discarded.
-	 *
-	 * Also take care that the global size doesn't go negative.  This may
-	 * lead to small accounting errors (particularly on the last page of the
-	 * last file in a checkpoint), but that will come out in the wash when
-	 * the page is evicted.
-	 */
-	size = WT_MIN(page->memory_footprint, cache->bytes_dirty);
-	(void)WT_ATOMIC_SUB8(cache->bytes_dirty, size);
-	(void)WT_ATOMIC_SUB8(page->modify->bytes_dirty, size);
+	modify = page->modify;
+	if (modify != NULL && modify->bytes_dirty != 0)
+		__wt_cache_page_byte_dirty_decr(
+		    session, page, modify->bytes_dirty);
 }
 
 /*
@@ -143,83 +208,44 @@ static inline void
 __wt_cache_page_evict(WT_SESSION_IMPL *session, WT_PAGE *page)
 {
 	WT_CACHE *cache;
-	WT_PAGE_MODIFY *mod;
+	WT_PAGE_MODIFY *modify;
 
 	cache = S2C(session)->cache;
-	mod = page->modify;
+	modify = page->modify;
 
-	/*
-	 * In rare cases, we may race tracking a page's dirty footprint.
-	 * If so, we will get here with a non-zero dirty_size in the page, and
-	 * we can fix the global stats.
-	 */
-	if (mod != NULL && mod->bytes_dirty != 0)
-		(void)WT_ATOMIC_SUB8(cache->bytes_dirty, mod->bytes_dirty);
+	/* Update the bytes in-memory to reflect the eviction. */
+	WT_CACHE_DECR(session, cache->bytes_inmem, page->memory_footprint);
 
-	WT_ASSERT(session, page->memory_footprint != 0);
+	/* Update the cache's dirty-byte count. */
+	if (modify != NULL && modify->bytes_dirty != 0) {
+		if (cache->bytes_dirty < modify->bytes_dirty) {
+			__wt_errx(session,
+			   "cache eviction dirty-bytes decrement failed: "
+			   "dirty byte count went negative");
+			cache->bytes_dirty = 0;
+		} else
+			WT_CACHE_DECR(
+			    session, cache->bytes_dirty, modify->bytes_dirty);
+	}
+
+	/* Update pages and bytes evicted. */
 	(void)WT_ATOMIC_ADD8(cache->bytes_evict, page->memory_footprint);
-	page->memory_footprint = 0;
-
 	(void)WT_ATOMIC_ADD8(cache->pages_evict, 1);
 }
 
 /*
- * __wt_cache_read_gen --
- *      Get the current read generation number.
+ * __wt_update_list_memsize --
+ *      The size in memory of a list of updates.
  */
-static inline uint64_t
-__wt_cache_read_gen(WT_SESSION_IMPL *session)
+static inline size_t
+__wt_update_list_memsize(WT_UPDATE *upd)
 {
-	return (S2C(session)->cache->read_gen);
-}
+	size_t upd_size;
 
-/*
- * __wt_cache_read_gen_incr --
- *      Increment the current read generation number.
- */
-static inline void
-__wt_cache_read_gen_incr(WT_SESSION_IMPL *session)
-{
-	++S2C(session)->cache->read_gen;
-}
+	for (upd_size = 0; upd != NULL; upd = upd->next)
+		upd_size += WT_UPDATE_MEMSIZE(upd);
 
-/*
- * __wt_cache_read_gen_set --
- *      Get the read generation to store in a page.
- */
-static inline uint64_t
-__wt_cache_read_gen_set(WT_SESSION_IMPL *session)
-{
-	/*
-	 * We return read-generations from the future (where "the future" is
-	 * measured by increments of the global read generation).  The reason
-	 * is because when acquiring a new hazard pointer for a page, we can
-	 * check its read generation, and if the read generation isn't less
-	 * than the current global generation, we don't bother updating the
-	 * page.  In other words, the goal is to avoid some number of updates
-	 * immediately after each update we have to make.
-	 */
-	return (__wt_cache_read_gen(session) + WT_READGEN_STEP);
-}
-
-/*
- * __wt_cache_pages_inuse --
- *	Return the number of pages in use.
- */
-static inline uint64_t
-__wt_cache_pages_inuse(WT_CACHE *cache)
-{
-	return (cache->pages_inmem - cache->pages_evict);
-}
-
-/*
- * __wt_cache_bytes_inuse --
- *	Return the number of bytes in use.
- */
-static inline uint64_t
-__wt_cache_bytes_inuse(WT_CACHE *cache)
-{
-	return (cache->bytes_inmem - cache->bytes_evict);
+	return (upd_size);
 }
 
 /*
@@ -243,8 +269,7 @@ __wt_page_refp(WT_SESSION_IMPL *session,
 	WT_PAGE_INDEX *pindex;
 	uint32_t i;
 
-	WT_ASSERT(session,
-	    WT_SESSION_TXN_STATE(session)->snap_min != WT_TXN_NONE);
+	WT_ASSERT(session, session->split_gen != 0);
 
 	/*
 	 * Copy the parent page's index value: the page can split at any time,
@@ -916,16 +941,126 @@ __wt_ref_info(WT_SESSION_IMPL *session,
 }
 
 /*
+ * __wt_page_can_evict --
+ *	Check whether a page can be evicted.
+ */
+static inline int
+__wt_page_can_evict(WT_SESSION_IMPL *session, WT_PAGE *page, int check_splits)
+{
+	WT_BTREE *btree;
+	WT_PAGE_MODIFY *mod;
+
+	btree = S2BT(session);
+	mod = page->modify;
+
+	/* Pages that have never been modified can always be evicted. */
+	if (mod == NULL)
+		return (1);
+
+	/*
+	 * If the tree was deepened, there's a requirement that newly created
+	 * internal pages not be evicted until all threads are known to have
+	 * exited the original page index array, because evicting an internal
+	 * page discards its WT_REF array, and a thread traversing the original
+	 * page index array might see an freed WT_REF.  During the split we set
+	 * a transaction value, once that's globally visible, we know we can
+	 * evict the created page.
+	 */
+	if (WT_PAGE_IS_INTERNAL(page) &&
+	    !__wt_txn_visible_all(session, mod->mod_split_txn))
+		return (0);
+
+	/*
+	 * If the file is being checkpointed, we can't evict dirty pages:
+	 * if we write a page and free the previous version of the page, that
+	 * previous version might be referenced by an internal page already
+	 * been written in the checkpoint, leaving the checkpoint inconsistent.
+	 */
+	if (btree->checkpointing &&
+	    (__wt_page_is_modified(page) ||
+	    F_ISSET(mod, WT_PM_REC_MULTIBLOCK))) {
+		WT_STAT_FAST_CONN_INCR(session, cache_eviction_checkpoint);
+		WT_STAT_FAST_DATA_INCR(session, cache_eviction_checkpoint);
+		return (0);
+	}
+
+	/*
+	 * If we aren't (potentially) doing eviction that can restore updates
+	 * and the updates on this page are too recent, give up.
+	 */
+	if (page->read_gen != WT_READGEN_OLDEST &&
+	    !__wt_txn_visible_all(session, __wt_page_is_modified(page) ?
+	    mod->update_txn : mod->rec_max_txn))
+		return (0);
+
+	/*
+	 * If the page was recently split in-memory, don't force it out: we
+	 * hope eviction will find it first.
+	 */
+	if (check_splits &&
+	    !__wt_txn_visible_all(session, mod->inmem_split_txn))
+		return (0);
+
+	return (1);
+}
+
+/*
+ * __wt_page_release_evict --
+ *	Attempt to release and immediately evict a page.
+ */
+static inline int
+__wt_page_release_evict(WT_SESSION_IMPL *session, WT_REF *ref)
+{
+	WT_BTREE *btree;
+	WT_DECL_RET;
+	WT_PAGE *page;
+	int locked, too_big;
+
+	btree = S2BT(session);
+	page = ref->page;
+	too_big = (page->memory_footprint > btree->maxmempage) ? 1 : 0;
+
+	/*
+	 * Take some care with order of operations: if we release the hazard
+	 * reference without first locking the page, it could be evicted in
+	 * between.
+	 */
+	locked = WT_ATOMIC_CAS4(ref->state, WT_REF_MEM, WT_REF_LOCKED);
+	WT_TRET(__wt_hazard_clear(session, page));
+	if (!locked) {
+		WT_TRET(EBUSY);
+		return (ret);
+	}
+
+	(void)WT_ATOMIC_ADD4(btree->evict_busy, 1);
+	if ((ret = __wt_evict_page(session, ref)) == 0) {
+		if (too_big)
+			WT_STAT_FAST_CONN_INCR(session, cache_eviction_force);
+		else
+			/*
+			 * If the page isn't too big, we are evicting it because
+			 * it had a chain of deleted entries that make traversal
+			 * expensive.
+			 */
+			WT_STAT_FAST_CONN_INCR(
+			    session, cache_eviction_force_delete);
+	} else {
+		WT_STAT_FAST_CONN_INCR(session, cache_eviction_force_fail);
+	}
+	(void)WT_ATOMIC_SUB4(btree->evict_busy, 1);
+
+	return (ret);
+}
+
+/*
  * __wt_page_release --
- *	Release a reference to a page.
+ *	Release a reference to a page, fail if busy during forced eviction.
  */
 static inline int
 __wt_page_release(WT_SESSION_IMPL *session, WT_REF *ref, uint32_t flags)
 {
 	WT_BTREE *btree;
-	WT_DECL_RET;
 	WT_PAGE *page;
-	int locked;
 
 	btree = S2BT(session);
 
@@ -939,10 +1074,9 @@ __wt_page_release(WT_SESSION_IMPL *session, WT_REF *ref, uint32_t flags)
 
 	/*
 	 * Attempt to evict pages with the special "oldest" read generation.
-	 *
 	 * This is set for pages that grow larger than the configured
-	 * memory_page_max setting, and when we are attempting to scan without
-	 * trashing the cache.
+	 * memory_page_max setting, when we see many deleted items, and when we
+	 * are attempting to scan without trashing the cache.
 	 *
 	 * Skip this if eviction is disabled for this operation or this tree,
 	 * or if there is no chance of eviction succeeding for dirty pages due
@@ -950,35 +1084,14 @@ __wt_page_release(WT_SESSION_IMPL *session, WT_REF *ref, uint32_t flags)
 	 * it contains an update that isn't stable.  Also skip forced eviction
 	 * if we just did an in-memory split.
 	 */
-	if (LF_ISSET(WT_READ_NO_EVICT) ||
-	    page->read_gen != WT_READGEN_OLDEST ||
+	if (page->read_gen != WT_READGEN_OLDEST ||
+	    LF_ISSET(WT_READ_NO_EVICT) ||
 	    F_ISSET(btree, WT_BTREE_NO_EVICTION) ||
-	    (__wt_page_is_modified(page) && (btree->checkpointing ||
-	    !__wt_txn_visible_all(session, page->modify->first_dirty_txn) ||
-	    !__wt_txn_visible_all(session, page->modify->inmem_split_txn))))
+	    !__wt_page_can_evict(session, page, 1))
 		return (__wt_hazard_clear(session, page));
 
-	/*
-	 * Take some care with order of operations: if we release the hazard
-	 * reference without first locking the page, it could be evicted in
-	 * between.
-	 */
-	locked = WT_ATOMIC_CAS4(ref->state, WT_REF_MEM, WT_REF_LOCKED);
-	WT_TRET(__wt_hazard_clear(session, page));
-	if (!locked)
-		return (ret);
-
-	(void)WT_ATOMIC_ADD4(btree->evict_busy, 1);
-	if ((ret = __wt_evict_page(session, ref)) == 0)
-		WT_STAT_FAST_CONN_INCR(session, cache_eviction_force);
-	else {
-		WT_STAT_FAST_CONN_INCR(session, cache_eviction_force_fail);
-		if (ret == EBUSY)
-			ret = 0;
-	}
-	(void)WT_ATOMIC_SUB4(btree->evict_busy, 1);
-
-	return (ret);
+	WT_RET_BUSY_OK(__wt_page_release_evict(session, ref));
+	return (0);
 }
 
 /*

@@ -1,4 +1,5 @@
 /*-
+ * Copyright (c) 2014-2015 MongoDB, Inc.
  * Copyright (c) 2008-2014 WiredTiger, Inc.
  *	All rights reserved.
  *
@@ -191,7 +192,7 @@ struct __wt_page_modify {
 	uint64_t inmem_split_txn;
 
 	/* Dirty bytes added to the cache. */
-	uint64_t bytes_dirty;
+	size_t bytes_dirty;
 
 	/*
 	 * When pages are reconciled, the result is one or more replacement
@@ -420,16 +421,21 @@ struct __wt_page {
 
 	/*
 	 * Macro to walk the list of references in an internal page.
+	 * Two flavors: by default, check that we have a split_gen, but
+	 * provide a "SAFE" version for code that can safely read the
+	 * page index without a split_gen.
 	 */
-#define	WT_INTL_FOREACH_BEGIN(session, page, ref) do {			\
+#define	WT_INTL_FOREACH_BEGIN_SAFE(session, page, ref) do {		\
 	WT_PAGE_INDEX *__pindex;					\
 	WT_REF **__refp;						\
 	uint32_t __entries;						\
-	WT_ASSERT(session, session->split_gen != 0);			\
 	for (__pindex = WT_INTL_INDEX_COPY(page),			\
 	    __refp = __pindex->index,					\
 	    __entries = __pindex->entries; __entries > 0; --__entries) {\
 		(ref) = *__refp++;
+#define	WT_INTL_FOREACH_BEGIN(session, page, ref)			\
+	WT_ASSERT(session, session->split_gen != 0);			\
+	WT_INTL_FOREACH_BEGIN_SAFE(session, page, ref)
 #define	WT_INTL_FOREACH_END						\
 	}								\
 } while (0)
@@ -531,7 +537,7 @@ struct __wt_page {
 #define	WT_READGEN_STEP		100
 	uint64_t read_gen;
 
-	uint64_t memory_footprint;	/* Memory attached to the page */
+	size_t memory_footprint;	/* Memory attached to the page */
 
 #define	WT_PAGE_IS_INTERNAL(page)					\
 	((page)->type == WT_PAGE_COL_INT || (page)->type == WT_PAGE_ROW_INT)
@@ -549,9 +555,10 @@ struct __wt_page {
 #define	WT_PAGE_DISK_ALLOC	0x02	/* Disk image in allocated memory */
 #define	WT_PAGE_DISK_MAPPED	0x04	/* Disk image in mapped memory */
 #define	WT_PAGE_EVICT_LRU	0x08	/* Page is on the LRU queue */
-#define	WT_PAGE_SCANNING	0x10	/* Obsolete updates are being scanned */
-#define	WT_PAGE_SPLITTING	0x20	/* An internal page is growing */
+#define	WT_PAGE_REFUSE_DEEPEN	0x10	/* Don't deepen the tree at this page */
+#define	WT_PAGE_SCANNING	0x20	/* Obsolete updates are being scanned */
 #define	WT_PAGE_SPLIT_INSERT	0x40	/* A leaf page was split for append */
+#define	WT_PAGE_SPLITTING	0x80	/* An internal page is growing */
 	uint8_t flags_atomic;		/* Atomic flags, use F_*_ATOMIC */
 };
 
@@ -757,11 +764,11 @@ struct __wt_col {
  * with RLE counts greater than 1 when reading the page.  We can do a binary
  * search in this array, then an offset calculation to find the cell.
  */
-struct __wt_col_rle {
+WT_PACKED_STRUCT_BEGIN(__wt_col_rle)
 	uint64_t recno;			/* Record number of first repeat. */
 	uint64_t rle;			/* Repeat count. */
 	uint32_t indx;			/* Slot of entry in col_var.d */
-} WT_GCC_ATTRIBUTE((packed));
+WT_PACKED_STRUCT_END
 
 /*
  * WT_COL_PTR, WT_COL_PTR_SET --
@@ -825,7 +832,7 @@ struct __wt_ikey {
  * is done for an entry, WT_UPDATE structures are formed into a forward-linked
  * list.
  */
-struct __wt_update {
+WT_PACKED_STRUCT_BEGIN(__wt_update)
 	uint64_t txnid;			/* update transaction */
 
 	WT_UPDATE *next;		/* forward-linked list */
@@ -837,12 +844,14 @@ struct __wt_update {
 	 */
 #define	WT_UPDATE_DELETED_ISSET(upd)	((upd)->size == UINT32_MAX)
 #define	WT_UPDATE_DELETED_SET(upd)	((upd)->size = UINT32_MAX)
+#define	WT_UPDATE_MEMSIZE(upd)						\
+	(sizeof(WT_UPDATE) + (WT_UPDATE_DELETED_ISSET(upd) ? 0 : (upd)->size))
 	uint32_t size;			/* update length */
 
 	/* The untyped value immediately follows the WT_UPDATE structure. */
 #define	WT_UPDATE_DATA(upd)						\
 	((void *)((uint8_t *)(upd) + sizeof(WT_UPDATE)))
-} WT_GCC_ATTRIBUTE((packed));
+};
 
 /*
  * WT_INSERT --
@@ -1000,11 +1009,18 @@ struct __wt_insert_head {
  * already have a split generation, leave it alone.  If our caller is examining
  * an index, we don't want the oldest split generation to move forward and
  * potentially free it.
+ *
+ * Check that we haven't raced with a split_gen update after publishing: we
+ * rely on the published value not being missed when scanning for the oldest
+ * active split_gen.
  */
 #define	WT_ENTER_PAGE_INDEX(session) do {				\
 	uint64_t __prev_split_gen = (session)->split_gen;		\
 	if (__prev_split_gen == 0)					\
-		WT_PUBLISH((session)->split_gen, S2C(session)->split_gen)
+		do {                                                    \
+			WT_PUBLISH((session)->split_gen,                \
+			    S2C(session)->split_gen);                   \
+		} while ((session)->split_gen != S2C(session)->split_gen)
 
 #define	WT_LEAVE_PAGE_INDEX(session)					\
 	if (__prev_split_gen == 0)					\

@@ -1,4 +1,5 @@
 /*-
+ * Copyright (c) 2014-2015 MongoDB, Inc.
  * Copyright (c) 2008-2014 WiredTiger, Inc.
  *	All rights reserved.
  *
@@ -12,8 +13,21 @@
 
 #define	inline __inline
 
-#define	WT_GCC_ATTRIBUTE(x)
+/*
+ * Add MSVC-specific attributes and pragmas to types and function declarations.
+ */
+#define	WT_COMPILER_TYPE_ALIGN(x)	__declspec(align(x))
+
+#define	WT_PACKED_STRUCT_BEGIN(name)					\
+	__pragma(pack(push,1))						\
+	struct name {
+
+#define	WT_PACKED_STRUCT_END						\
+	};								\
+	__pragma(pack(pop))
+
 #define	WT_GCC_FUNC_ATTRIBUTE(x)
+#define	WT_GCC_FUNC_DECL_ATTRIBUTE(x)
 
 #define	__WT_ATOMIC_ADD(v, val, n, s, t)				\
 	(WT_STATIC_ASSERT(sizeof(v) == (n)),				\
