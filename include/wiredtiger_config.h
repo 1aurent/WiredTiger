@@ -16,7 +16,8 @@
 #pragma comment(lib,"Snappy.lib")
 
 /* Zlib support automatically loaded. */
-/* #undef HAVE_BUILTIN_EXTENSION_ZLIB */
+#define HAVE_BUILTIN_EXTENSION_ZLIB
+#pragma comment(lib,"ZLib.lib")
 
 /* Define to 1 if you have the `clock_gettime' function. */
 /* #undef HAVE_CLOCK_GETTIME */

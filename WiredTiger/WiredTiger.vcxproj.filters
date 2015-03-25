@@ -565,6 +565,9 @@
     <ClCompile Include="snappy_compress.c">
       <Filter>Ext</Filter>
     </ClCompile>
+    <ClCompile Include="zlib_compress.c">
+      <Filter>Ext</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Src">

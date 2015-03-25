@@ -199,89 +199,11 @@
     <ClCompile Include="utilities\util_verbose.c" />
     <ClCompile Include="utilities\util_verify.c" />
     <ClCompile Include="utilities\util_write.c" />
+    <ClCompile Include="zlib_compress.c" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\include\api.h" />
-    <ClInclude Include="..\include\async.h" />
-    <ClInclude Include="..\include\block.h" />
-    <ClInclude Include="..\include\bloom.h" />
-    <ClInclude Include="..\include\btmem.h" />
-    <ClInclude Include="..\include\btree.h" />
-    <ClInclude Include="..\include\cache.h" />
-    <ClInclude Include="..\include\compact.h" />
-    <ClInclude Include="..\include\config.h" />
-    <ClInclude Include="..\include\connection.h" />
-    <ClInclude Include="..\include\cursor.h" />
-    <ClInclude Include="..\include\dhandle.h" />
-    <ClInclude Include="..\include\dlh.h" />
-    <ClInclude Include="..\include\error.h" />
-    <ClInclude Include="..\include\extern.h" />
-    <ClInclude Include="..\include\flags.h" />
-    <ClInclude Include="..\include\gcc.h" />
-    <ClInclude Include="..\include\hardware.h" />
-    <ClInclude Include="..\include\lint.h" />
-    <ClInclude Include="..\include\log.h" />
-    <ClInclude Include="..\include\lsm.h" />
-    <ClInclude Include="..\include\meta.h" />
-    <ClInclude Include="..\include\misc.h" />
-    <ClInclude Include="..\include\msvc.h" />
-    <ClInclude Include="..\include\mutex.h" />
-    <ClInclude Include="..\include\os.h" />
-    <ClInclude Include="..\include\os_windows.h" />
-    <ClInclude Include="..\include\posix.h" />
-    <ClInclude Include="..\include\queue.h" />
-    <ClInclude Include="..\include\schema.h" />
-    <ClInclude Include="..\include\session.h" />
-    <ClInclude Include="..\include\stat.h" />
-    <ClInclude Include="..\include\txn.h" />
-    <ClInclude Include="..\include\verify_build.h" />
-    <ClInclude Include="..\include\wiredtiger.h" />
-    <ClInclude Include="..\include\wiredtiger_config.h" />
-    <ClInclude Include="..\include\wiredtiger_ext.h" />
-    <ClInclude Include="..\include\wt_internal.h" />
     <ClInclude Include="utilities\util.h" />
     <ClInclude Include="utilities\util_load.h" />
-  </ItemGroup>
-  <ItemGroup>
-    <ClInclude Include="..\include\bitstring.i">
-      <FileType>Document</FileType>
-    </ClInclude>
-    <ClInclude Include="..\include\btree.i">
-      <FileType>Document</FileType>
-    </ClInclude>
-    <ClInclude Include="..\include\buf.i">
-      <FileType>Document</FileType>
-    </ClInclude>
-    <ClInclude Include="..\include\cache.i">
-      <FileType>Document</FileType>
-    </ClInclude>
-    <ClInclude Include="..\include\cell.i">
-      <FileType>Document</FileType>
-    </ClInclude>
-    <ClInclude Include="..\include\column.i">
-      <FileType>Document</FileType>
-    </ClInclude>
-    <ClInclude Include="..\include\cursor.i">
-      <FileType>Document</FileType>
-    </ClInclude>
-    <ClInclude Include="..\include\intpack.i">
-      <FileType>Document</FileType>
-    </ClInclude>
-    <ClInclude Include="..\include\misc.i">
-      <FileType>Document</FileType>
-    </ClInclude>
-    <ClInclude Include="..\include\mutex.i">
-      <FileType>Document</FileType>
-    </ClInclude>
-    <ClInclude Include="..\include\packing.i">
-      <FileType>Document</FileType>
-    </ClInclude>
-    <ClInclude Include="..\include\serial.i">
-      <FileType>Document</FileType>
-    </ClInclude>
-    <ClInclude Include="..\include\txn.i">
-      <FileType>Document</FileType>
-    </ClInclude>
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{6BC38272-11DF-42BB-931F-1ABB5070A2A0}</ProjectGuid>
@@ -328,7 +250,7 @@
       <Optimization>Disabled</Optimization>
       <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;WIN32;_DEBUG;_LIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>$(SolutionDir)include</AdditionalIncludeDirectories>
-      <CompileAsManaged>false</CompileAsManaged>
+      <ProgramDataBaseFileName>$(OutDir)$(ProjectName).pdb</ProgramDataBaseFileName>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -348,9 +270,7 @@
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;WIN32;NDEBUG;_LIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>$(SolutionDir)include</AdditionalIncludeDirectories>
-      <OmitFramePointers>false</OmitFramePointers>
-      <CompileAsManaged>false</CompileAsManaged>
-      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <ProgramDataBaseFileName>$(OutDir)$(ProjectName).pdb</ProgramDataBaseFileName>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
