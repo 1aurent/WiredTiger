@@ -178,32 +178,7 @@
     <ClCompile Include="txn\txn_ext.c" />
     <ClCompile Include="txn\txn_log.c" />
     <ClCompile Include="txn\txn_recover.c" />
-    <ClCompile Include="utilities\util_backup.c" />
-    <ClCompile Include="utilities\util_compact.c" />
-    <ClCompile Include="utilities\util_cpyright.c" />
-    <ClCompile Include="utilities\util_create.c" />
-    <ClCompile Include="utilities\util_drop.c" />
-    <ClCompile Include="utilities\util_dump.c" />
-    <ClCompile Include="utilities\util_list.c" />
-    <ClCompile Include="utilities\util_load.c" />
-    <ClCompile Include="utilities\util_loadtext.c" />
-    <ClCompile Include="utilities\util_load_json.c" />
-    <ClCompile Include="utilities\util_main.c" />
-    <ClCompile Include="utilities\util_misc.c" />
-    <ClCompile Include="utilities\util_printlog.c" />
-    <ClCompile Include="utilities\util_read.c" />
-    <ClCompile Include="utilities\util_rename.c" />
-    <ClCompile Include="utilities\util_salvage.c" />
-    <ClCompile Include="utilities\util_stat.c" />
-    <ClCompile Include="utilities\util_upgrade.c" />
-    <ClCompile Include="utilities\util_verbose.c" />
-    <ClCompile Include="utilities\util_verify.c" />
-    <ClCompile Include="utilities\util_write.c" />
     <ClCompile Include="zlib_compress.c" />
-  </ItemGroup>
-  <ItemGroup>
-    <ClInclude Include="utilities\util.h" />
-    <ClInclude Include="utilities\util_load.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{6BC38272-11DF-42BB-931F-1ABB5070A2A0}</ProjectGuid>
