@@ -9,6 +9,7 @@
 #include "wt_internal.h"
 
 static int __session_checkpoint(WT_SESSION *, const char *);
+static int __session_snapshot(WT_SESSION *, const char *);
 static int __session_rollback_transaction(WT_SESSION *, const char *);
 
 /*
@@ -74,6 +75,7 @@ __session_clear(WT_SESSION_IMPL *session)
 	memset(session, 0, WT_SESSION_CLEAR_SIZE(session));
 	session->hazard_size = 0;
 	session->nhazard = 0;
+	WT_INIT_LSN(&session->bg_sync_lsn);
 }
 
 /*
@@ -95,7 +97,7 @@ __session_close(WT_SESSION *wt_session, const char *config)
 	WT_UNUSED(cfg);
 
 	/* Rollback any active transaction. */
-	if (F_ISSET(&session->txn, TXN_RUNNING))
+	if (F_ISSET(&session->txn, WT_TXN_RUNNING))
 		WT_TRET(__session_rollback_transaction(wt_session, NULL));
 
 	/*
@@ -143,9 +145,6 @@ __session_close(WT_SESSION *wt_session, const char *config)
 		WT_TRET(session->block_manager_cleanup(session));
 	if (session->reconcile_cleanup != NULL)
 		WT_TRET(session->reconcile_cleanup(session));
-
-	/* Free the eviction exclusive-lock information. */
-	__wt_free(session, session->excl);
 
 	/* Destroy the thread's mutex. */
 	WT_TRET(__wt_cond_destroy(session, &session->cond));
@@ -196,7 +195,7 @@ __session_reconfigure(WT_SESSION *wt_session, const char *config)
 	session = (WT_SESSION_IMPL *)wt_session;
 	SESSION_API_CALL(session, reconfigure, config, cfg);
 
-	if (F_ISSET(&session->txn, TXN_RUNNING))
+	if (F_ISSET(&session->txn, WT_TXN_RUNNING))
 		WT_ERR_MSG(session, EINVAL, "transaction in progress");
 
 	WT_TRET(__wt_session_reset_cursors(session));
@@ -205,9 +204,9 @@ __session_reconfigure(WT_SESSION *wt_session, const char *config)
 	if (cval.len != 0)
 		session->isolation = session->txn.isolation =
 		    WT_STRING_MATCH("snapshot", cval.str, cval.len) ?
-		    TXN_ISO_SNAPSHOT :
+		    WT_ISO_SNAPSHOT :
 		    WT_STRING_MATCH("read-uncommitted", cval.str, cval.len) ?
-		    TXN_ISO_READ_UNCOMMITTED : TXN_ISO_READ_COMMITTED;
+		    WT_ISO_READ_UNCOMMITTED : WT_ISO_READ_COMMITTED;
 
 err:	API_END_RET_NOTFOUND_MAP(session, ret);
 }
@@ -388,7 +387,7 @@ __wt_session_create_strip(WT_SESSION *wt_session,
 {
 	WT_SESSION_IMPL *session = (WT_SESSION_IMPL *)wt_session;
 	const char *cfg[] =
-	    { WT_CONFIG_BASE(session, session_create), v1, v2, NULL };
+	    { WT_CONFIG_BASE(session, WT_SESSION_create), v1, v2, NULL };
 
 	return (__wt_config_collapse(session, cfg, value_ret));
 }
@@ -549,12 +548,12 @@ __session_salvage(WT_SESSION *wt_session, const char *uri, const char *config)
 	session = (WT_SESSION_IMPL *)wt_session;
 
 	SESSION_API_CALL(session, salvage, config, cfg);
+
 	/* Block out checkpoints to avoid spurious EBUSY errors. */
-	__wt_spin_lock(session, &S2C(session)->checkpoint_lock);
-	WT_WITH_SCHEMA_LOCK(session,
-	    ret = __wt_schema_worker(session, uri, __wt_salvage,
-	    NULL, cfg, WT_DHANDLE_EXCLUSIVE | WT_BTREE_SALVAGE));
-	__wt_spin_unlock(session, &S2C(session)->checkpoint_lock);
+	WT_WITH_CHECKPOINT_LOCK(session,
+	    WT_WITH_SCHEMA_LOCK(session, ret =
+		__wt_schema_worker(session, uri, __wt_salvage,
+		NULL, cfg, WT_DHANDLE_EXCLUSIVE | WT_BTREE_SALVAGE)));
 
 err:	API_END_RET_NOTFOUND_MAP(session, ret);
 }
@@ -609,8 +608,10 @@ __session_truncate(WT_SESSION *wt_session,
 				    "target after the log: URI prefix.");
 			ret = __wt_log_truncate_files(session, start, cfg);
 		} else
-			WT_WITH_SCHEMA_LOCK(session,
-			    ret = __wt_schema_truncate(session, uri, cfg));
+			/* Wait for checkpoints to avoid EBUSY errors. */
+			WT_WITH_CHECKPOINT_LOCK(session,
+			    WT_WITH_SCHEMA_LOCK(session,
+				ret = __wt_schema_truncate(session, uri, cfg)));
 		goto done;
 	}
 
@@ -714,11 +715,10 @@ __session_upgrade(WT_SESSION *wt_session, const char *uri, const char *config)
 
 	SESSION_API_CALL(session, upgrade, config, cfg);
 	/* Block out checkpoints to avoid spurious EBUSY errors. */
-	__wt_spin_lock(session, &S2C(session)->checkpoint_lock);
-	WT_WITH_SCHEMA_LOCK(session,
-	    ret = __wt_schema_worker(session, uri, __wt_upgrade,
-	    NULL, cfg, WT_DHANDLE_EXCLUSIVE | WT_BTREE_UPGRADE));
-	__wt_spin_unlock(session, &S2C(session)->checkpoint_lock);
+	WT_WITH_CHECKPOINT_LOCK(session,
+	    WT_WITH_SCHEMA_LOCK(session,
+		ret = __wt_schema_worker(session, uri, __wt_upgrade,
+		NULL, cfg, WT_DHANDLE_EXCLUSIVE | WT_BTREE_UPGRADE)));
 
 err:	API_END_RET_NOTFOUND_MAP(session, ret);
 }
@@ -737,11 +737,10 @@ __session_verify(WT_SESSION *wt_session, const char *uri, const char *config)
 
 	SESSION_API_CALL(session, verify, config, cfg);
 	/* Block out checkpoints to avoid spurious EBUSY errors. */
-	__wt_spin_lock(session, &S2C(session)->checkpoint_lock);
-	WT_WITH_SCHEMA_LOCK(session,
-	    ret = __wt_schema_worker(session, uri, __wt_verify,
-	    NULL, cfg, WT_DHANDLE_EXCLUSIVE | WT_BTREE_VERIFY));
-	__wt_spin_unlock(session, &S2C(session)->checkpoint_lock);
+	WT_WITH_CHECKPOINT_LOCK(session,
+	    WT_WITH_SCHEMA_LOCK(session,
+		ret = __wt_schema_worker(session, uri, __wt_verify,
+		NULL, cfg, WT_DHANDLE_EXCLUSIVE | WT_BTREE_VERIFY)));
 
 err:	API_END_RET_NOTFOUND_MAP(session, ret);
 }
@@ -760,7 +759,7 @@ __session_begin_transaction(WT_SESSION *wt_session, const char *config)
 	SESSION_API_CALL(session, begin_transaction, config, cfg);
 	WT_STAT_FAST_CONN_INCR(session, txn_begin);
 
-	if (F_ISSET(&session->txn, TXN_RUNNING))
+	if (F_ISSET(&session->txn, WT_TXN_RUNNING))
 		WT_ERR_MSG(session, EINVAL, "Transaction already running");
 
 	ret = __wt_txn_begin(session, cfg);
@@ -784,7 +783,7 @@ __session_commit_transaction(WT_SESSION *wt_session, const char *config)
 	WT_STAT_FAST_CONN_INCR(session, txn_commit);
 
 	txn = &session->txn;
-	if (F_ISSET(txn, TXN_ERROR)) {
+	if (F_ISSET(txn, WT_TXN_ERROR)) {
 		__wt_errx(session, "failed transaction requires rollback");
 		ret = EINVAL;
 	}
@@ -839,7 +838,7 @@ __session_transaction_pinned_range(WT_SESSION *wt_session, uint64_t *prange)
 
 	/* Assign pinned to the lesser of id or snap_min */
 	if (txn_state->id != WT_TXN_NONE &&
-	    TXNID_LT(txn_state->id, txn_state->snap_min))
+	    WT_TXNID_LT(txn_state->id, txn_state->snap_min))
 		pinned = txn_state->id;
 	else
 		pinned = txn_state->snap_min;
@@ -848,6 +847,89 @@ __session_transaction_pinned_range(WT_SESSION *wt_session, uint64_t *prange)
 		*prange = 0;
 	else
 		*prange = S2C(session)->txn_global.current - pinned;
+
+err:	API_END_RET(session, ret);
+}
+
+/*
+ * __session_transaction_sync --
+ *	WT_SESSION->transaction_sync method.
+ */
+static int
+__session_transaction_sync(WT_SESSION *wt_session, const char *config)
+{
+	WT_CONFIG_ITEM cval;
+	WT_CONNECTION_IMPL *conn;
+	WT_DECL_RET;
+	WT_LOG *log;
+	WT_SESSION_IMPL *session;
+	WT_TXN *txn;
+	struct timespec now, start;
+	uint64_t timeout_ms, waited_ms;
+	int forever;
+
+	session = (WT_SESSION_IMPL *)wt_session;
+	SESSION_API_CALL(session, transaction_sync, config, cfg);
+	WT_STAT_FAST_CONN_INCR(session, txn_sync);
+
+	conn = S2C(session);
+	txn = &session->txn;
+	if (F_ISSET(txn, WT_TXN_RUNNING))
+		WT_ERR_MSG(session, EINVAL, "transaction in progress");
+
+	/*
+	 * If logging is not enabled there is nothing to do.
+	 */
+	if (!FLD_ISSET(conn->log_flags, WT_CONN_LOG_ENABLED))
+		WT_ERR_MSG(session, EINVAL, "logging not enabled");
+
+	log = conn->log;
+	timeout_ms = waited_ms = 0;
+	forever = 1;
+
+	/*
+	 * If there is no background sync LSN in this session, there
+	 * is nothing to do.
+	 */
+	if (WT_IS_INIT_LSN(&session->bg_sync_lsn))
+		goto err;
+
+	/*
+	 * If our LSN is smaller than the current sync LSN then our
+	 * transaction is stable.  We're done.
+	 */
+	if (WT_LOG_CMP(&session->bg_sync_lsn, &log->sync_lsn) <= 0)
+		goto err;
+
+	/*
+	 * Our LSN is not yet stable.  Wait and check again depending on the
+	 * timeout.
+	 */
+	WT_ERR(__wt_config_gets_def(
+	    session, cfg, "timeout_ms", (int)UINT_MAX, &cval));
+	if ((unsigned int)cval.val != UINT_MAX) {
+		timeout_ms = (uint64_t)cval.val;
+		forever = 0;
+	}
+
+	if (timeout_ms == 0)
+		WT_ERR(ETIMEDOUT);
+
+	WT_ERR(__wt_epoch(session, &start));
+	/*
+	 * Keep checking the LSNs until we find it is stable or we reach
+	 * our timeout.
+	 */
+	while (WT_LOG_CMP(&session->bg_sync_lsn, &log->sync_lsn) > 0) {
+		WT_ERR(__wt_cond_signal(session, conn->log_file_cond));
+		WT_ERR(__wt_epoch(session, &now));
+		waited_ms = WT_TIMEDIFF(now, start) / WT_MILLION;
+		if (forever || waited_ms < timeout_ms)
+			WT_ERR(__wt_cond_wait(
+			    session, log->log_sync_cond, waited_ms));
+		else
+			WT_ERR(ETIMEDOUT);
+	}
 
 err:	API_END_RET(session, ret);
 }
@@ -883,7 +965,7 @@ __session_checkpoint(WT_SESSION *wt_session, const char *config)
 	 * from evicting anything newer than this because we track the oldest
 	 * transaction ID in the system that is not visible to all readers.
 	 */
-	if (F_ISSET(txn, TXN_RUNNING))
+	if (F_ISSET(txn, WT_TXN_RUNNING))
 		WT_ERR_MSG(session, EINVAL,
 		    "Checkpoint not permitted in a transaction");
 
@@ -911,15 +993,49 @@ __session_checkpoint(WT_SESSION *wt_session, const char *config)
 	 * here to ensure we don't get into trouble.
 	 */
 	WT_STAT_FAST_CONN_SET(session, txn_checkpoint_running, 1);
-	__wt_spin_lock(session, &S2C(session)->checkpoint_lock);
 
-	ret = __wt_txn_checkpoint(session, cfg);
+	WT_WITH_CHECKPOINT_LOCK(session,
+	    ret = __wt_txn_checkpoint(session, cfg));
 
 	WT_STAT_FAST_CONN_SET(session, txn_checkpoint_running, 0);
 
-	__wt_spin_unlock(session, &S2C(session)->checkpoint_lock);
-
 err:	F_CLR(session, WT_SESSION_CAN_WAIT | WT_SESSION_NO_CACHE_CHECK);
+
+	API_END_RET_NOTFOUND_MAP(session, ret);
+}
+
+/*
+ * __session_snapshot --
+ *	WT_SESSION->snapshot method.
+ */
+static int
+__session_snapshot(WT_SESSION *wt_session, const char *config)
+{
+	WT_DECL_RET;
+	WT_SESSION_IMPL *session;
+	WT_TXN_GLOBAL *txn_global;
+	int has_create, has_drop;
+
+	has_create = has_drop = 0;
+	session = (WT_SESSION_IMPL *)wt_session;
+	txn_global = &S2C(session)->txn_global;
+
+	SESSION_API_CALL(session, snapshot, config, cfg);
+
+	WT_ERR(__wt_txn_named_snapshot_config(
+	    session, cfg, &has_create, &has_drop));
+
+	WT_ERR(__wt_writelock(session, txn_global->nsnap_rwlock));
+
+	/* Drop any snapshots to be removed first. */
+	if (has_drop)
+		WT_ERR(__wt_txn_named_snapshot_drop(session, cfg));
+
+	/* Start the named snapshot if requested. */
+	if (has_create)
+		WT_ERR(__wt_txn_named_snapshot_begin(session, cfg));
+
+err:	WT_TRET(__wt_writeunlock(session, txn_global->nsnap_rwlock));
 
 	API_END_RET_NOTFOUND_MAP(session, ret);
 }
@@ -950,7 +1066,7 @@ __wt_open_internal_session(WT_CONNECTION_IMPL *conn, const char *name,
 
 	*sessionp = NULL;
 
-	WT_RET(__wt_open_session(conn, NULL, NULL, &session));
+	WT_RET(__wt_open_session(conn, NULL, NULL, open_metadata, &session));
 	session->name = name;
 
 	/*
@@ -968,19 +1084,6 @@ __wt_open_internal_session(WT_CONNECTION_IMPL *conn, const char *name,
 	if (!uses_dhandles)
 		F_SET(session, WT_SESSION_NO_DATA_HANDLES);
 
-	/*
-	 * Acquiring the metadata handle requires the schema lock; we've seen
-	 * problems in the past where a worker thread has acquired the schema
-	 * lock unexpectedly, relatively late in the run, and deadlocked. Be
-	 * defensive, get it now.  The metadata file may not exist when the
-	 * connection first creates its default session or the shared cache
-	 * pool creates its sessions, let our caller decline this work.
-	 */
-	if (open_metadata) {
-		WT_ASSERT(session, !F_ISSET(session, WT_SESSION_SCHEMA_LOCKED));
-		WT_RET(__wt_metadata_open(session));
-	}
-
 	*sessionp = session;
 	return (0);
 }
@@ -992,7 +1095,7 @@ __wt_open_internal_session(WT_CONNECTION_IMPL *conn, const char *name,
  */
 int
 __wt_open_session(WT_CONNECTION_IMPL *conn,
-    WT_EVENT_HANDLER *event_handler, const char *config,
+    WT_EVENT_HANDLER *event_handler, const char *config, int open_metadata,
     WT_SESSION_IMPL **sessionp)
 {
 	static const WT_SESSION stds = {
@@ -1015,7 +1118,9 @@ __wt_open_session(WT_CONNECTION_IMPL *conn,
 		__session_commit_transaction,
 		__session_rollback_transaction,
 		__session_checkpoint,
-		__session_transaction_pinned_range
+		__session_snapshot,
+		__session_transaction_pinned_range,
+		__session_transaction_sync
 	};
 	WT_DECL_RET;
 	WT_SESSION_IMPL *session, *session_ret;
@@ -1061,7 +1166,7 @@ __wt_open_session(WT_CONNECTION_IMPL *conn,
 	WT_ERR(__wt_cond_alloc(session, "session", 0, &session_ret->cond));
 
 	if (WT_SESSION_FIRST_USE(session_ret))
-		__wt_random_init(session_ret->rnd);
+		__wt_random_init(&session_ret->rnd);
 
 	__wt_event_handler_set(session_ret,
 	    event_handler == NULL ? session->event_handler : event_handler);
@@ -1084,7 +1189,7 @@ __wt_open_session(WT_CONNECTION_IMPL *conn,
 	}
 
 	/* Initialize transaction support: default to read-committed. */
-	session_ret->isolation = TXN_ISO_READ_COMMITTED;
+	session_ret->isolation = WT_ISO_READ_COMMITTED;
 	WT_ERR(__wt_txn_init(session_ret));
 
 	/*
@@ -1128,5 +1233,20 @@ __wt_open_session(WT_CONNECTION_IMPL *conn,
 	WT_STAT_FAST_CONN_INCR(session, session_open);
 
 err:	__wt_spin_unlock(session, &conn->api_lock);
-	return (ret);
+	WT_RET(ret);
+
+	/*
+	 * Acquiring the metadata handle requires the schema lock; we've seen
+	 * problems in the past where a session has acquired the schema lock
+	 * unexpectedly, relatively late in the run, and deadlocked. Be
+	 * defensive, get it now.  The metadata file may not exist when the
+	 * connection first creates its default session or the shared cache
+	 * pool creates its sessions, let our caller decline this work.
+	 */
+	if (open_metadata) {
+		WT_ASSERT(session, !F_ISSET(session, WT_SESSION_LOCKED_SCHEMA));
+		WT_RET(__wt_metadata_open(session_ret));
+	}
+
+	return (0);
 }

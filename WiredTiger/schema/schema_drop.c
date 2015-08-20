@@ -18,7 +18,7 @@ __drop_file(
 {
 	WT_CONFIG_ITEM cval;
 	WT_DECL_RET;
-	int exist, remove_files;
+	int remove_files;
 	const char *filename;
 
 	WT_RET(__wt_config_gets(session, cfg, "remove_files", &cval));
@@ -29,7 +29,7 @@ __drop_file(
 		return (EINVAL);
 
 	/* Close all btree handles associated with this file. */
-	WT_WITH_DHANDLE_LOCK(session,
+	WT_WITH_HANDLE_LIST_LOCK(session,
 	    ret = __wt_conn_dhandle_close_all(session, uri, force));
 	WT_RET(ret);
 
@@ -38,16 +38,11 @@ __drop_file(
 	if (!remove_files)
 		return (ret);
 
-	/* Remove the underlying physical file. */
-	exist = 0;
-	WT_TRET(__wt_exist(session, filename, &exist));
-	if (exist) {
-		/*
-		 * There is no point tracking this operation: there is no going
-		 * back from here.
-		 */
-		WT_TRET(__wt_remove(session, filename));
-	}
+	/*
+	 * Remove the underlying physical file. There is no point tracking this
+	 * operation: there is no going back from here.
+	 */
+	WT_TRET(__wt_remove_if_exists(session, filename));
 
 	return (ret);
 }
@@ -64,7 +59,7 @@ __drop_colgroup(
 	WT_DECL_RET;
 	WT_TABLE *table;
 
-	WT_ASSERT(session, F_ISSET(session, WT_SESSION_TABLE_LOCKED));
+	WT_ASSERT(session, F_ISSET(session, WT_SESSION_LOCKED_TABLE));
 
 	/* If we can get the colgroup, detach it from the table. */
 	if ((ret = __wt_schema_get_colgroup(
@@ -125,8 +120,13 @@ __drop_table(
 	for (i = 0; i < WT_COLGROUPS(table); i++) {
 		if ((colgroup = table->cgroups[i]) == NULL)
 			continue;
-		WT_ERR(__wt_metadata_remove(session, colgroup->name));
+		/*
+		 * Drop the column group before updating the metadata to avoid
+		 * the metadata for the table becoming inconsistent if we can't
+		 * get exclusive access.
+		 */
 		WT_ERR(__wt_schema_drop(session, colgroup->source, cfg));
+		WT_ERR(__wt_metadata_remove(session, colgroup->name));
 	}
 
 	/* Drop the indices. */
@@ -134,8 +134,13 @@ __drop_table(
 	for (i = 0; i < table->nindices; i++) {
 		if ((idx = table->indices[i]) == NULL)
 			continue;
-		WT_ERR(__wt_metadata_remove(session, idx->name));
+		/*
+		 * Drop the column group before updating the metadata to avoid
+		 * the metadata for the table becoming inconsistent if we can't
+		 * get exclusive access.
+		 */
 		WT_ERR(__wt_schema_drop(session, idx->source, cfg));
+		WT_ERR(__wt_metadata_remove(session, idx->name));
 	}
 
 	WT_ERR(__wt_schema_remove_table(session, table));
@@ -197,7 +202,7 @@ __wt_schema_drop(WT_SESSION_IMPL *session, const char *uri, const char *cfg[])
 	/* Bump the schema generation so that stale data is ignored. */
 	++S2C(session)->schema_gen;
 
-	WT_TRET(__wt_meta_track_off(session, ret != 0));
+	WT_TRET(__wt_meta_track_off(session, 1, ret != 0));
 
 	return (ret);
 }

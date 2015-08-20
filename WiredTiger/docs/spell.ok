@@ -9,6 +9,7 @@ CFLAGS
 CPPFLAGS
 Cheng
 Christoph
+Collet's
 Coverity
 Coverity's
 DB's
@@ -22,7 +23,9 @@ EB
 EBUSY
 ECMA
 EINVAL
+ENCRYPTOR
 EmpId
+Encryptors
 Facebook
 Facebook's
 FlexeLint
@@ -38,13 +41,16 @@ HyperDex
 HyperLevelDB
 IEC
 JavaScript
+KMS
 LD
 LDFLAGS
 LIBS
 LLVM
 LOGREC
+LRVv
 LSB
 LSM
+LZ
 Lameter
 LevelDB
 Levyx
@@ -80,6 +86,7 @@ WiredTigerPanicException
 WiredTigerRollbackException
 WiredTigerStat
 WiredTigerTestCase
+Yann
 Za
 aR
 abstime
@@ -143,6 +150,7 @@ copydoc
 cpp
 crashless
 cursortype
+customerABC
 cv
 dN
 dNLen
@@ -158,6 +166,8 @@ dbformat
 dbm
 dbt
 decl
+decrypt
+decrypted
 del
 desc
 destructor
@@ -176,6 +186,9 @@ dt
 dumpfile
 dup
 dups
+encrypt
+encryptor
+encryptors
 endcode
 endcond
 endian
@@ -241,6 +254,7 @@ json
 kb
 keyexist
 keyfmt
+keyid
 keyname
 keyvalue
 kvs
@@ -264,6 +278,7 @@ lrtf
 lsm
 lsn
 lt
+lz
 mailto
 mainpage
 malloc
@@ -373,6 +388,7 @@ rf
 rmw
 ro
 rocksdb
+rotn
 rpc
 runnable
 runtime
@@ -383,6 +399,7 @@ scalable
 scanf
 schemas
 scons
+secretkey
 selectable
 seqname
 seqno
@@ -409,6 +426,7 @@ substring
 superset
 sys
 sz
+tRuE
 tablename
 tcl
 tcmalloc
@@ -435,6 +453,7 @@ ul
 umask
 unallocated
 unencoded
+unencrypted
 unescaped
 unicode
 uninstall

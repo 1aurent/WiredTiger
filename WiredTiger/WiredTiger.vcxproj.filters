@@ -505,6 +505,18 @@
     <ClCompile Include="zlib_compress.c">
       <Filter>Ext</Filter>
     </ClCompile>
+    <ClCompile Include="lsm\lsm_cursor_bulk.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="support\crypto.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="txn\txn_nsnap.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="os_posix\os_stdio.c">
+      <Filter>Psx</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Src">

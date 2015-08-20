@@ -94,6 +94,7 @@
     <ClCompile Include="log\log_auto.c" />
     <ClCompile Include="log\log_slot.c" />
     <ClCompile Include="lsm\lsm_cursor.c" />
+    <ClCompile Include="lsm\lsm_cursor_bulk.c" />
     <ClCompile Include="lsm\lsm_manager.c" />
     <ClCompile Include="lsm\lsm_merge.c" />
     <ClCompile Include="lsm\lsm_meta.c" />
@@ -112,6 +113,7 @@
     <ClCompile Include="os_posix\os_getline.c" />
     <ClCompile Include="os_posix\os_getopt.c" />
     <ClCompile Include="os_posix\os_mtx_rw.c" />
+    <ClCompile Include="os_posix\os_stdio.c" />
     <ClCompile Include="os_posix\os_strtouq.c" />
     <ClCompile Include="os_win\os_dir.c" />
     <ClCompile Include="os_win\os_dlopen.c" />
@@ -160,6 +162,7 @@
     <ClCompile Include="session\session_salvage.c" />
     <ClCompile Include="snappy_compress.c" />
     <ClCompile Include="support\cksum.c" />
+    <ClCompile Include="support\crypto.c" />
     <ClCompile Include="support\err.c" />
     <ClCompile Include="support\filename.c" />
     <ClCompile Include="support\global.c" />
@@ -177,6 +180,7 @@
     <ClCompile Include="txn\txn_ckpt.c" />
     <ClCompile Include="txn\txn_ext.c" />
     <ClCompile Include="txn\txn_log.c" />
+    <ClCompile Include="txn\txn_nsnap.c" />
     <ClCompile Include="txn\txn_recover.c" />
     <ClCompile Include="zlib_compress.c" />
   </ItemGroup>

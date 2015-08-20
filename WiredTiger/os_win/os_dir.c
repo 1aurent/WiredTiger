@@ -18,7 +18,7 @@ __wt_dirlist(WT_SESSION_IMPL *session, const char *dir, const char *prefix,
     uint32_t flags, char ***dirlist, u_int *countp)
 {
 	HANDLE findhandle;
-	WIN32_FIND_DATAA finddata;
+	WIN32_FIND_DATA finddata;
 	WT_DECL_ITEM(pathbuf);
 	WT_DECL_RET;
 	size_t dirallocsz, pathlen;

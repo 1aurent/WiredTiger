@@ -16,16 +16,9 @@ static int
 __open_directory(WT_SESSION_IMPL *session, char *path, int *fd)
 {
 	WT_DECL_RET;
-	char *dir;
 
-	if ((dir = strrchr(path, '/')) == NULL)
-		path = (char *)".";
-	else
-		*dir = '\0';
 	WT_SYSCALL_RETRY(((*fd =
 	    open(path, O_RDONLY, 0444)) == -1 ? 1 : 0), ret);
-	if (dir != NULL)
-		*dir = '/';
 	if (ret != 0)
 		WT_RET_MSG(session, ret, "%s: open_directory", path);
 	return (ret);
@@ -60,7 +53,7 @@ __wt_open(WT_SESSION_IMPL *session,
 	hash = __wt_hash_city64(name, strlen(name));
 	bucket = hash % WT_HASH_ARRAY_SIZE;
 	__wt_spin_lock(session, &conn->fh_lock);
-	SLIST_FOREACH(tfh, &conn->fhhash[bucket], l) {
+	SLIST_FOREACH(tfh, &conn->fhhash[bucket], hashl) {
 		if (strcmp(name, tfh->name) == 0) {
 			++tfh->ref;
 			*fhp = tfh;
@@ -174,7 +167,7 @@ setupfh:
 	 */
 	matched = 0;
 	__wt_spin_lock(session, &conn->fh_lock);
-	SLIST_FOREACH(tfh, &conn->fhhash[bucket], l) {
+	SLIST_FOREACH(tfh, &conn->fhhash[bucket], hashl) {
 		if (strcmp(name, tfh->name) == 0) {
 			++tfh->ref;
 			*fhp = tfh;
@@ -184,8 +177,7 @@ setupfh:
 	}
 	if (!matched) {
 		WT_CONN_FILE_INSERT(conn, fh, bucket);
-		WT_STAT_FAST_CONN_INCR(session, file_open);
-
+		(void)WT_ATOMIC_ADD4(conn->open_file_count, 1);
 		*fhp = fh;
 	}
 	__wt_spin_unlock(session, &conn->fh_lock);
@@ -207,13 +199,19 @@ err:		if (fh != NULL) {
  *	Close a file handle.
  */
 int
-__wt_close(WT_SESSION_IMPL *session, WT_FH *fh)
+__wt_close(WT_SESSION_IMPL *session, WT_FH **fhp)
 {
 	WT_CONNECTION_IMPL *conn;
 	WT_DECL_RET;
+	WT_FH *fh;
 	uint64_t bucket;
 
 	conn = S2C(session);
+
+	if (*fhp == NULL)
+		return (0);
+	fh = *fhp;
+	*fhp = NULL;
 
 	__wt_spin_lock(session, &conn->fh_lock);
 	if (fh == NULL || fh->ref == 0 || --fh->ref > 0) {
@@ -224,7 +222,7 @@ __wt_close(WT_SESSION_IMPL *session, WT_FH *fh)
 	/* Remove from the list. */
 	bucket = fh->name_hash % WT_HASH_ARRAY_SIZE;
 	WT_CONN_FILE_REMOVE(conn, fh, bucket);
-	WT_STAT_FAST_CONN_DECR(session, file_open);
+	(void)WT_ATOMIC_SUB4(conn->open_file_count, 1);
 
 	__wt_spin_unlock(session, &conn->fh_lock);
 

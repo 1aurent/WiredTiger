@@ -9,6 +9,21 @@
 #include "wt_internal.h"
 
 /*
+ * On systems with poor default allocators for allocations greater than 16 KB,
+ * we provide an option to use TCMalloc explicitly.
+ * This is important on Windows which does not have a builtin mechanism
+ * to replace C run-time memory management functions with alternatives.
+ */
+#ifdef HAVE_LIBTCMALLOC
+#include <gperftools/tcmalloc.h>
+
+#define	calloc			tc_calloc
+#define	realloc 		tc_realloc
+#define	posix_memalign 		tc_posix_memalign
+#define	free 			tc_free
+#endif
+
+/*
  * There's no malloc interface, WiredTiger never calls malloc.
  *
  * The problem is an application might allocate memory, write secret stuff in
@@ -26,6 +41,12 @@ int
 __wt_calloc(WT_SESSION_IMPL *session, size_t number, size_t size, void *retp)
 {
 	void *p;
+
+	/*
+	 * Defensive: if our caller doesn't handle errors correctly, ensure a
+	 * free won't fail.
+	 */
+	*(void **)retp = NULL;
 
 	/*
 	 * !!!
@@ -134,8 +155,18 @@ __wt_realloc_aligned(WT_SESSION_IMPL *session,
 		WT_ASSERT(session, bytes_to_allocate != 0);
 		WT_ASSERT(session, bytes_allocated < bytes_to_allocate);
 
-		if (session != NULL)
-			WT_STAT_FAST_CONN_INCR(session, memory_allocation);
+		/*
+		 * We are going to allocate an aligned buffer.  When we do this
+		 * repeatedly, the allocator is expected to start on a boundary
+		 * each time, account for that additional space by never asking
+		 * for less than a full alignment size.  The primary use case
+		 * for aligned buffers is Linux direct I/O, which requires that
+		 * the size be a multiple of the alignment anyway.
+		 */
+		bytes_to_allocate =
+		    WT_ALIGN(bytes_to_allocate, S2C(session)->buffer_alignment);
+
+		WT_STAT_FAST_CONN_INCR(session, memory_allocation);
 
 		if ((ret = posix_memalign(&newp,
 		    S2C(session)->buffer_alignment,
@@ -194,17 +225,6 @@ __wt_strndup(WT_SESSION_IMPL *session, const void *str, size_t len, void *retp)
 
 	*(void **)retp = p;
 	return (0);
-}
-
-/*
- * __wt_strdup --
- *	ANSI strdup function.
- */
-int
-__wt_strdup(WT_SESSION_IMPL *session, const char *str, void *retp)
-{
-	return (__wt_strndup(
-	    session, str, (str == NULL) ? 0 : strlen(str), retp));
 }
 
 /*

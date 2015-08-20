@@ -99,8 +99,7 @@ __debug_config(WT_SESSION_IMPL *session, WT_DBG *ds, const char *ofile)
 		return (__wt_scr_alloc(session, 512, &ds->msg));
 
 	/* If we're using a file, flush on each line. */
-	if ((ds->fp = fopen(ofile, "w")) == NULL)
-		WT_RET_MSG(session, __wt_errno(), "%s", ofile);
+	WT_RET(__wt_fopen(session, ofile, WT_FHANDLE_WRITE, 0, &ds->fp));
 
 	(void)setvbuf(ds->fp, NULL, _IOLBF, 0);
 	return (0);
@@ -132,8 +131,7 @@ __dmsg_wrapup(WT_DBG *ds)
 	}
 
 	/* Close any file we opened. */
-	if (ds->fp != NULL)
-		(void)fclose(ds->fp);
+	(void)__wt_fclose(&ds->fp, WT_FHANDLE_WRITE);
 }
 
 /*
@@ -190,7 +188,7 @@ __dmsg(WT_DBG *ds, const char *fmt, ...)
 		}
 	} else {
 		va_start(ap, fmt);
-		(void)vfprintf(ds->fp, fmt, ap);
+		(void)__wt_vfprintf(ds->fp, fmt, ap);
 		va_end(ap);
 	}
 }
@@ -204,13 +202,14 @@ __wt_debug_addr_print(
     WT_SESSION_IMPL *session, const uint8_t *addr, size_t addr_size)
 {
 	WT_DECL_ITEM(buf);
+	WT_DECL_RET;
 
 	WT_RET(__wt_scr_alloc(session, 128, &buf));
-	fprintf(stderr, "%s\n",
-	    __wt_addr_string(session, addr, addr_size, buf));
+	ret = __wt_fprintf(stderr,
+	    "%s\n", __wt_addr_string(session, addr, addr_size, buf));
 	__wt_scr_free(session, &buf);
 
-	return (0);
+	return (ret);
 }
 
 /*
@@ -325,13 +324,22 @@ __wt_debug_disk(
 		/* FALLTHROUGH */
 	case WT_PAGE_ROW_INT:
 	case WT_PAGE_ROW_LEAF:
-		__dmsg(ds, ", entries %" PRIu32 "\n", dsk->u.entries);
+		__dmsg(ds, ", entries %" PRIu32, dsk->u.entries);
 		break;
 	case WT_PAGE_OVFL:
-		__dmsg(ds, ", datalen %" PRIu32 "\n", dsk->u.datalen);
+		__dmsg(ds, ", datalen %" PRIu32, dsk->u.datalen);
 		break;
 	WT_ILLEGAL_VALUE(session);
 	}
+
+	if (F_ISSET(dsk, WT_PAGE_COMPRESSED))
+		__dmsg(ds, ", compressed");
+	if (F_ISSET(dsk, WT_PAGE_EMPTY_V_ALL))
+		__dmsg(ds, ", empty-all");
+	if (F_ISSET(dsk, WT_PAGE_EMPTY_V_NONE))
+		__dmsg(ds, ", empty-none");
+
+	__dmsg(ds, ", generation %" PRIu64 "\n", dsk->write_gen);
 
 	switch (dsk->type) {
 	case WT_PAGE_BLOCK_MANAGER:
@@ -397,7 +405,7 @@ __debug_dsk_cell(WT_DBG *ds, const WT_PAGE_HEADER *dsk)
 }
 
 /*
- * __debug_shape_info --
+ * __debug_tree_shape_info --
  *	Pretty-print information about a page.
  */
 static char *
@@ -430,7 +438,7 @@ __debug_tree_shape_worker(WT_DBG *ds, WT_PAGE *page, int level)
 
 	session = ds->session;
 
-	if (page->type == WT_PAGE_ROW_INT || page->type == WT_PAGE_COL_INT) {
+	if (WT_PAGE_IS_INTERNAL(page)) {
 		__dmsg(ds, "%*s" "I" "%d %s\n",
 		    level * 3, " ", level, __debug_tree_shape_info(page));
 		WT_INTL_FOREACH_BEGIN(session, page, ref) {
@@ -548,8 +556,7 @@ __debug_page(WT_DBG *ds, WT_PAGE *page, uint32_t flags)
 	session = ds->session;
 
 	/* Dump the page metadata. */
-	WT_WITH_PAGE_INDEX(session,
-	    ret = __debug_page_metadata(ds, page));
+	WT_WITH_PAGE_INDEX(session, ret = __debug_page_metadata(ds, page));
 	WT_RET(ret);
 
 	/* Dump the page. */
@@ -602,7 +609,7 @@ __debug_page_metadata(WT_DBG *ds, WT_PAGE *page)
 	switch (page->type) {
 	case WT_PAGE_COL_INT:
 		__dmsg(ds, " recno %" PRIu64, page->pg_intl_recno);
-		pindex = WT_INTL_INDEX_COPY(page);
+		WT_INTL_INDEX_GET(session, page, pindex);
 		entries = pindex->entries;
 		break;
 	case WT_PAGE_COL_FIX:
@@ -614,7 +621,7 @@ __debug_page_metadata(WT_DBG *ds, WT_PAGE *page)
 		entries = page->pg_var_entries;
 		break;
 	case WT_PAGE_ROW_INT:
-		pindex = WT_INTL_INDEX_COPY(page);
+		WT_INTL_INDEX_GET(session, page, pindex);
 		entries = pindex->entries;
 		break;
 	case WT_PAGE_ROW_LEAF:
@@ -634,10 +641,14 @@ __debug_page_metadata(WT_DBG *ds, WT_PAGE *page)
 		__dmsg(ds, ", disk-mapped");
 	if (F_ISSET_ATOMIC(page, WT_PAGE_EVICT_LRU))
 		__dmsg(ds, ", evict-lru");
+	if (F_ISSET_ATOMIC(page, WT_PAGE_REFUSE_DEEPEN))
+		__dmsg(ds, ", refuse-deepen");
 	if (F_ISSET_ATOMIC(page, WT_PAGE_SCANNING))
 		__dmsg(ds, ", scanning");
-	if (F_ISSET_ATOMIC(page, WT_PAGE_SPLITTING))
-		__dmsg(ds, ", splitting");
+	if (F_ISSET_ATOMIC(page, WT_PAGE_SPLIT_INSERT))
+		__dmsg(ds, ", split-insert");
+	if (F_ISSET_ATOMIC(page, WT_PAGE_SPLIT_LOCKED))
+		__dmsg(ds, ", split-locked");
 
 	if (mod != NULL)
 		switch (F_ISSET(mod, WT_PM_REC_MASK)) {
@@ -649,6 +660,9 @@ __debug_page_metadata(WT_DBG *ds, WT_PAGE *page)
 			break;
 		case WT_PM_REC_REPLACE:
 			__dmsg(ds, ", replaced");
+			break;
+		case WT_PM_REC_REWRITE:
+			__dmsg(ds, ", rewrite");
 			break;
 		case 0:
 			break;
@@ -791,7 +805,7 @@ __debug_page_row_int(WT_DBG *ds, WT_PAGE *page, uint32_t flags)
 	WT_REF *ref;
 	WT_SESSION_IMPL *session;
 	size_t len;
-	uint8_t *p;
+	void *p;
 
 	session = ds->session;
 

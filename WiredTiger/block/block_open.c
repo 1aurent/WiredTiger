@@ -25,7 +25,7 @@ __wt_block_manager_truncate(
 	WT_RET(__wt_open(session, filename, 0, 0, WT_FILE_TYPE_DATA, &fh));
 
 	/* Truncate the file. */
-	WT_ERR(__wt_ftruncate(session, fh, (wt_off_t)0));
+	WT_ERR(__wt_block_truncate(session, fh, (wt_off_t)0));
 
 	/* Write out the file's meta-data. */
 	WT_ERR(__wt_desc_init(session, fh, allocsize));
@@ -37,7 +37,7 @@ __wt_block_manager_truncate(
 	WT_ERR(__wt_fsync(session, fh));
 
 	/* Close the file handle. */
-err:	WT_TRET(__wt_close(session, fh));
+err:	WT_TRET(__wt_close(session, &fh));
 
 	return (ret);
 }
@@ -51,11 +51,41 @@ __wt_block_manager_create(
     WT_SESSION_IMPL *session, const char *filename, uint32_t allocsize)
 {
 	WT_DECL_RET;
+	WT_DECL_ITEM(tmp);
 	WT_FH *fh;
+	int exists, suffix;
 	char *path;
 
-	/* Create the underlying file and open a handle. */
-	WT_RET(__wt_open(session, filename, 1, 1, WT_FILE_TYPE_DATA, &fh));
+	/*
+	 * Create the underlying file and open a handle.
+	 *
+	 * Since WiredTiger schema operations are (currently) non-transactional,
+	 * it's possible to see a partially-created file left from a previous
+	 * create. Further, there's nothing to prevent users from creating files
+	 * in our space. Move any existing files out of the way and complain.
+	 */
+	for (;;) {
+		if ((ret = __wt_open(
+		    session, filename, 1, 1, WT_FILE_TYPE_DATA, &fh)) == 0)
+			break;
+		WT_ERR_TEST(ret != EEXIST, ret);
+
+		if (tmp == NULL)
+			WT_ERR(__wt_scr_alloc(session, 0, &tmp));
+		for (suffix = 1;; ++suffix) {
+			WT_ERR(__wt_buf_fmt(
+			    session, tmp, "%s.%d", filename, suffix));
+			WT_ERR(__wt_exist(session, tmp->data, &exists));
+			if (!exists) {
+				WT_ERR(
+				    __wt_rename(session, filename, tmp->data));
+				WT_ERR(__wt_msg(session,
+				    "unexpected file %s found, renamed to %s",
+				    filename, (char *)tmp->data));
+				break;
+			}
+		}
+	}
 
 	/* Write out the file's meta-data. */
 	ret = __wt_desc_init(session, fh, allocsize);
@@ -67,7 +97,7 @@ __wt_block_manager_create(
 	WT_TRET(__wt_fsync(session, fh));
 
 	/* Close the file handle. */
-	WT_TRET(__wt_close(session, fh));
+	WT_TRET(__wt_close(session, &fh));
 
 	/*
 	 * If checkpoint syncing is enabled, some filesystems require that we
@@ -82,6 +112,8 @@ __wt_block_manager_create(
 	/* Undo any create on error. */
 	if (ret != 0)
 		WT_TRET(__wt_remove(session, filename));
+
+err:	__wt_scr_free(session, &tmp);
 
 	return (ret);
 }
@@ -105,13 +137,32 @@ __block_destroy(WT_SESSION_IMPL *session, WT_BLOCK *block)
 		__wt_free(session, block->name);
 
 	if (block->fh != NULL)
-		WT_TRET(__wt_close(session, block->fh));
+		WT_TRET(__wt_close(session, &block->fh));
 
 	__wt_spin_destroy(session, &block->live_lock);
 
 	__wt_overwrite_and_free(session, block);
 
 	return (ret);
+}
+
+/*
+ * __wt_block_configure_first_fit --
+ *	Configure first-fit allocation.
+ */
+void
+__wt_block_configure_first_fit(WT_BLOCK *block, int on)
+{
+	/*
+	 * Switch to first-fit allocation so we rewrite blocks at the start of
+	 * the file; use atomic instructions because checkpoints also configure
+	 * first-fit allocation, and this way we stay on first-fit allocation
+	 * as long as any operation wants it.
+	 */
+	if (on)
+		(void)WT_ATOMIC_ADD4(block->allocfirst, 1);
+	else
+		(void)WT_ATOMIC_SUB4(block->allocfirst, 1);
 }
 
 /*

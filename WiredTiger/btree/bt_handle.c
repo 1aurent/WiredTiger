@@ -133,16 +133,13 @@ __wt_btree_close(WT_SESSION_IMPL *session)
 {
 	WT_BM *bm;
 	WT_BTREE *btree;
-	WT_DATA_HANDLE *dhandle;
 	WT_DECL_RET;
 
-	dhandle = session->dhandle;
 	btree = S2BT(session);
 
 	if ((bm = btree->bm) != NULL) {
 		/* Unload the checkpoint, unless it's a special command. */
-		if (F_ISSET(dhandle, WT_DHANDLE_OPEN) &&
-		    !F_ISSET(btree,
+		if (!F_ISSET(btree,
 		    WT_BTREE_SALVAGE | WT_BTREE_UPGRADE | WT_BTREE_VERIFY))
 			WT_TRET(bm->checkpoint_unload(bm, session));
 
@@ -170,8 +167,11 @@ __wt_btree_close(WT_SESSION_IMPL *session)
 		btree->collator_owned = 0;
 	}
 	btree->collator = NULL;
+	btree->kencryptor = NULL;
 
 	btree->bulk_load_ok = 0;
+
+	F_CLR(btree, WT_BTREE_SPECIAL_FLAGS);
 
 	return (ret);
 }
@@ -184,17 +184,17 @@ static int
 __btree_conf(WT_SESSION_IMPL *session, WT_CKPT *ckpt)
 {
 	WT_BTREE *btree;
-	WT_CONFIG_ITEM cval, metadata;
+	WT_CONFIG_ITEM cval, enc, keyid, metadata;
 	WT_CONNECTION_IMPL *conn;
-	WT_NAMED_COMPRESSOR *ncomp;
+	WT_DECL_RET;
 	int64_t maj_version, min_version;
 	uint32_t bitcnt;
 	int fixed;
-	const char **cfg;
+	const char **cfg, *enc_cfg[] = { NULL, NULL };
 
 	btree = S2BT(session);
-	conn = S2C(session);
 	cfg = btree->dhandle->cfg;
+	conn = S2C(session);
 
 	/* Dump out format information. */
 	if (WT_VERBOSE_ISSET(session, WT_VERB_VERSION)) {
@@ -212,7 +212,7 @@ __btree_conf(WT_SESSION_IMPL *session, WT_CKPT *ckpt)
 
 	/* Validate file types and check the data format plan. */
 	WT_RET(__wt_config_gets(session, cfg, "key_format", &cval));
-	WT_RET(__wt_struct_check(session, cval.str, cval.len, NULL, NULL));
+	WT_RET(__wt_struct_confchk(session, &cval));
 	if (WT_STRING_MATCH("r", cval.str, cval.len))
 		btree->type = BTREE_COL_VAR;
 	else
@@ -220,18 +220,19 @@ __btree_conf(WT_SESSION_IMPL *session, WT_CKPT *ckpt)
 	WT_RET(__wt_strndup(session, cval.str, cval.len, &btree->key_format));
 
 	WT_RET(__wt_config_gets(session, cfg, "value_format", &cval));
-	WT_RET(__wt_struct_check(session, cval.str, cval.len, NULL, NULL));
+	WT_RET(__wt_struct_confchk(session, &cval));
 	WT_RET(__wt_strndup(session, cval.str, cval.len, &btree->value_format));
 
 	/* Row-store key comparison and key gap for prefix compression. */
 	if (btree->type == BTREE_ROW) {
-		WT_RET(
-		    __wt_config_gets(session, cfg, "app_metadata", &metadata));
 		WT_RET(__wt_config_gets_none(session, cfg, "collator", &cval));
-		if (cval.len != 0)
+		if (cval.len != 0) {
+			WT_RET(__wt_config_gets(
+			    session, cfg, "app_metadata", &metadata));
 			WT_RET(__wt_collator_config(
 			    session, btree->dhandle->name, &cval, &metadata,
 			    &btree->collator, &btree->collator_owned));
+		}
 
 		WT_RET(__wt_config_gets(session, cfg, "key_gap", &cval));
 		btree->key_gap = (uint32_t)cval.val;
@@ -254,15 +255,26 @@ __btree_conf(WT_SESSION_IMPL *session, WT_CKPT *ckpt)
 	/* Page sizes */
 	WT_RET(__btree_page_sizes(session));
 
-	/* Eviction; the metadata file is never evicted. */
-	if (WT_IS_METADATA(btree->dhandle))
-		F_SET(btree, WT_BTREE_NO_EVICTION | WT_BTREE_NO_HAZARD);
-	else {
+	/* 
+	 * Set special flags for the metadata file.
+	 * Eviction; the metadata file is never evicted.
+	 * Logging; the metadata file is always logged if possible.
+	 */
+	if (WT_IS_METADATA(btree->dhandle)) {
+		F_SET(btree, WT_BTREE_IN_MEMORY | WT_BTREE_NO_EVICTION);
+		F_CLR(btree, WT_BTREE_NO_LOGGING);
+	} else {
 		WT_RET(__wt_config_gets(session, cfg, "cache_resident", &cval));
 		if (cval.val)
-			F_SET(btree, WT_BTREE_NO_EVICTION | WT_BTREE_NO_HAZARD);
+			F_SET(btree, WT_BTREE_IN_MEMORY | WT_BTREE_NO_EVICTION);
 		else
-			F_CLR(btree, WT_BTREE_NO_EVICTION);
+			F_CLR(btree, WT_BTREE_IN_MEMORY | WT_BTREE_NO_EVICTION);
+
+		WT_RET(__wt_config_gets(session, cfg, "log.enabled", &cval));
+		if (cval.val)
+			F_CLR(btree, WT_BTREE_NO_LOGGING);
+		else
+			F_SET(btree, WT_BTREE_NO_LOGGING);
 	}
 
 	/* Checksums */
@@ -307,16 +319,32 @@ __btree_conf(WT_SESSION_IMPL *session, WT_CKPT *ckpt)
 	}
 
 	WT_RET(__wt_config_gets_none(session, cfg, "block_compressor", &cval));
-	if (cval.len > 0) {
-		TAILQ_FOREACH(ncomp, &conn->compqh, q)
-			if (WT_STRING_MATCH(ncomp->name, cval.str, cval.len)) {
-				btree->compressor = ncomp->compressor;
-				break;
-			}
-		if (btree->compressor == NULL)
-			WT_RET_MSG(session, EINVAL,
-			    "unknown block compressor '%.*s'",
-			    (int)cval.len, cval.str);
+	WT_RET(__wt_compressor_config(session, &cval, &btree->compressor));
+
+	/*
+	 * We do not use __wt_config_gets_none here because "none"
+	 * and the empty string have different meanings.  The
+	 * empty string means inherit the system encryption setting
+	 * and "none" means this table is in the clear even if the
+	 * database is encrypted.  If this is the metadata handle
+	 * always inherit from the connection.
+	 */
+	WT_RET(__wt_config_gets(session, cfg, "encryption.name", &cval));
+	if (WT_IS_METADATA(btree->dhandle) || cval.len == 0)
+		btree->kencryptor = conn->kencryptor;
+	else if (WT_STRING_MATCH("none", cval.str, cval.len))
+		btree->kencryptor = NULL;
+	else {
+		WT_RET(__wt_config_gets_none(
+		    session, cfg, "encryption.keyid", &keyid));
+		WT_RET(__wt_config_gets(session, cfg, "encryption", &enc));
+		if (enc.len != 0)
+			WT_RET(__wt_strndup(session, enc.str, enc.len,
+			    &enc_cfg[0]));
+		ret = __wt_encryptor_config(session, &cval, &keyid,
+		    (WT_CONFIG_ARG *)enc_cfg, &btree->kencryptor);
+		__wt_free(session, enc_cfg[0]);
+		WT_RET(ret);
 	}
 
 	/* Initialize locks. */
@@ -376,9 +404,10 @@ __wt_btree_tree_open(
 	 * the page steals it.
 	 */
 	WT_ERR(__wt_bt_read(session, &dsk, addr, addr_size));
-	WT_ERR(__wt_page_inmem(session, NULL, dsk.data,
+	WT_ERR(__wt_verify_dsk(session, (const char *)addr, &dsk));
+	WT_ERR(__wt_page_inmem(session, NULL, dsk.data, dsk.memsize,
 	    WT_DATA_IN_ITEM(&dsk) ?
-	    WT_PAGE_DISK_ALLOC : WT_PAGE_DISK_MAPPED , &page));
+	    WT_PAGE_DISK_ALLOC : WT_PAGE_DISK_MAPPED, &page));
 	dsk.mem = NULL;
 
 	/* Finish initializing the root, root reference links. */
@@ -434,7 +463,7 @@ __btree_tree_open_empty(WT_SESSION_IMPL *session, int creation)
 		    __wt_page_alloc(session, WT_PAGE_COL_INT, 1, 1, 1, &root));
 		root->pg_intl_parent_ref = &btree->root;
 
-		pindex = WT_INTL_INDEX_COPY(root);
+		pindex = WT_INTL_INDEX_GET_SAFE(root);
 		ref = pindex->index[0];
 		ref->home = root;
 		ref->page = NULL;
@@ -447,7 +476,7 @@ __btree_tree_open_empty(WT_SESSION_IMPL *session, int creation)
 		    __wt_page_alloc(session, WT_PAGE_ROW_INT, 0, 1, 1, &root));
 		root->pg_intl_parent_ref = &btree->root;
 
-		pindex = WT_INTL_INDEX_COPY(root);
+		pindex = WT_INTL_INDEX_GET_SAFE(root);
 		ref = pindex->index[0];
 		ref->home = root;
 		ref->page = NULL;
@@ -519,8 +548,11 @@ __wt_btree_evictable(WT_SESSION_IMPL *session, int on)
 
 	btree = S2BT(session);
 
-	/* The metadata file is never evicted. */
-	if (on && !WT_IS_METADATA(btree->dhandle))
+	/* Permanently cache-resident files can never be evicted. */
+	if (F_ISSET(btree, WT_BTREE_IN_MEMORY))
+		return;
+
+	if (on)
 		F_CLR(btree, WT_BTREE_NO_EVICTION);
 	else
 		F_SET(btree, WT_BTREE_NO_EVICTION);
@@ -623,10 +655,10 @@ __btree_page_sizes(WT_SESSION_IMPL *session)
 	 * When a page is forced to split, we want at least 50 entries on its
 	 * parent.
 	 *
-	 * Don't let pages grow to more than half the cache size.  Otherwise,
-	 * with very small caches, we can end up in a situation where nothing
-	 * can be evicted.  Take care getting the cache size: with a shared
-	 * cache, it may not have been set.
+	 * Don't let pages grow larger than a quarter of the cache, with too-
+	 * small caches, we can end up in a situation where nothing can be
+	 * evicted.  Take care getting the cache size: with a shared cache,
+	 * it may not have been set.
 	 */
 	WT_RET(__wt_config_gets(session, cfg, "memory_page_max", &cval));
 	btree->maxmempage =
