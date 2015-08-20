@@ -11,7 +11,7 @@
 const char *home = ".";				/* Home directory */
 const char *progname;				/* Program name */
 						/* Global arguments */
-const char *usage_prefix = "[-Vv] [-R] [-C config] [-h home]";
+const char *usage_prefix = "[-LRVv] [-C config] [-E secretkey] [-h home]";
 int verbose;					/* Verbose flag */
 
 static const char *command;			/* Command name */
@@ -30,11 +30,13 @@ main(int argc, char *argv[])
 	WT_SESSION *session;
 	size_t len;
 	int ch, major_v, minor_v, tret, (*func)(WT_SESSION *, int, char *[]);
-	char *p;
-	const char *cmd_config, *config, *rec_config;
+	int logoff, recover;
+	char *p, *secretkey;
+	const char *cmd_config, *config, *p1, *p2, *p3, *rec_config;
 
 	conn = NULL;
 	p = NULL;
+	secretkey = NULL;
 
 	/* Get the program name. */
 	if ((progname = strrchr(argv[0], '/')) == NULL)
@@ -56,7 +58,7 @@ main(int argc, char *argv[])
 		return (EXIT_FAILURE);
 	}
 
-	cmd_config = config = NULL;
+	cmd_config = config = secretkey = NULL;
 	/*
 	 * We default to returning an error if recovery needs to be run.
 	 * Generally we expect this to be run after a clean shutdown.
@@ -64,17 +66,30 @@ main(int argc, char *argv[])
 	 * needed, the user can specify -R to run recovery.
 	 */
 	rec_config = REC_ERROR;
+	logoff = recover = 0;
 	/* Check for standard options. */
-	while ((ch = __wt_getopt(progname, argc, argv, "C:h:RVv")) != EOF)
+	while ((ch = __wt_getopt(progname, argc, argv, "C:E:h:LRVv")) != EOF)
 		switch (ch) {
 		case 'C':			/* wiredtiger_open config */
 			cmd_config = __wt_optarg;
 			break;
+		case 'E':			/* secret key */
+			if ((secretkey = strdup(__wt_optarg)) == NULL) {
+				ret = util_err(NULL, errno, NULL);
+				goto err;
+			}
+			memset(__wt_optarg, 0, strlen(__wt_optarg));
+			break;
 		case 'h':			/* home directory */
 			home = __wt_optarg;
 			break;
+		case 'L':			/* no logging */
+			rec_config = REC_LOGOFF;
+			logoff = 1;
+			break;
 		case 'R':			/* recovery */
 			rec_config = REC_RECOVER;
+			recover = 1;
 			break;
 		case 'V':			/* version */
 			printf("%s\n", wiredtiger_version(NULL, NULL, NULL));
@@ -86,6 +101,10 @@ main(int argc, char *argv[])
 		default:
 			return (usage());
 		}
+	if (logoff && recover) {
+		fprintf(stderr, "Only one of -L and -R is allowed.\n");
+		return (EXIT_FAILURE);
+	}
 	argc -= __wt_optind;
 	argv += __wt_optind;
 
@@ -171,28 +190,35 @@ main(int argc, char *argv[])
 
 	/* Build the configuration string. */
 	len = 10;					/* some slop */
+	p1 = p2 = p3 = "";
 	if (config != NULL)
 		len += strlen(config);
 	if (cmd_config != NULL)
 		len += strlen(cmd_config);
+	if (secretkey != NULL) {
+		len += strlen(secretkey) + 30;
+		p1 = ",encryption=(secretkey=";
+		p2 = secretkey;
+		p3 = ")";
+	}
 	len += strlen(rec_config);
 	if ((p = malloc(len)) == NULL) {
-		ret = util_err(errno, NULL);
+		ret = util_err(NULL, errno, NULL);
 		goto err;
 	}
-	(void)snprintf(p, len, "%s,%s,%s",
+	(void)snprintf(p, len, "%s,%s,%s%s%s%s",
 	    config == NULL ? "" : config,
-	    cmd_config == NULL ? "" : cmd_config, rec_config);
+	    cmd_config == NULL ? "" : cmd_config, rec_config, p1, p2, p3);
 	config = p;
 
 	/* Open the database and a session. */
 	if ((ret = wiredtiger_open(home,
 	    verbose ? verbose_handler : NULL, config, &conn)) != 0) {
-		ret = util_err(ret, NULL);
+		ret = util_err(NULL, ret, NULL);
 		goto err;
 	}
 	if ((ret = conn->open_session(conn, NULL, NULL, &session)) != 0) {
-		ret = util_err(ret, NULL);
+		ret = util_err(NULL, ret, NULL);
 		goto err;
 	}
 
@@ -204,8 +230,8 @@ main(int argc, char *argv[])
 err:	if (conn != NULL && (tret = conn->close(conn, NULL)) != 0 && ret == 0)
 		ret = tret;
 
-	if (p != NULL)
-		free(p);
+	free(p);
+	free(secretkey);
 
 	return (ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE);
 }
@@ -218,11 +244,12 @@ usage(void)
 	    WIREDTIGER_VERSION_MAJOR, WIREDTIGER_VERSION_MINOR);
 	fprintf(stderr,
 	    "global options:\n"
-	    "\t" "-C\twiredtiger_open configuration\n"
-	    "\t" "-h\tdatabase directory\n"
-	    "\t" "-R\trun recovery if configured\n"
-	    "\t" "-V\tdisplay library version and exit\n"
-	    "\t" "-v\tverbose\n");
+	    "\t" "-C\t" "wiredtiger_open configuration\n"
+	    "\t" "-h\t" "database directory\n"
+	    "\t" "-L\t" "turn logging off for debug-mode\n"
+	    "\t" "-R\t" "run recovery if configured\n"
+	    "\t" "-V\t" "display library version and exit\n"
+	    "\t" "-v\t" "verbose\n");
 	fprintf(stderr,
 	    "commands:\n"
 	    "\t" "backup\t  database backup\n"
@@ -251,7 +278,7 @@ usage(void)
  *	Build a name.
  */
 char *
-util_name(const char *s, const char *type)
+util_name(WT_SESSION *session, const char *s, const char *type)
 {
 	size_t len;
 	char *name;
@@ -267,7 +294,7 @@ util_name(const char *s, const char *type)
 
 	len = strlen(type) + strlen(s) + 2;
 	if ((name = calloc(len, 1)) == NULL) {
-		(void)util_err(errno, NULL);
+		(void)util_err(session, errno, NULL);
 		return (NULL);
 	}
 

@@ -21,6 +21,8 @@ __wt_stat_init_dsrc_stats(WT_DSRC_STATS *stats)
 	stats->block_major.desc = "block-manager: file major version number";
 	stats->block_size.desc = "block-manager: file size in bytes";
 	stats->block_minor.desc = "block-manager: minor version number";
+	stats->btree_checkpoint_generation.desc =
+	    "btree: btree checkpoint generation";
 	stats->btree_column_fix.desc =
 	    "btree: column-store fixed-size leaf pages";
 	stats->btree_column_internal.desc =
@@ -246,10 +248,21 @@ __wt_stat_aggregate_dsrc_stats(const void *child, const void *parent)
 	p->block_checkpoint_size.v += c->block_checkpoint_size.v;
 	p->block_reuse_bytes.v += c->block_reuse_bytes.v;
 	p->block_size.v += c->block_size.v;
+	p->btree_checkpoint_generation.v += c->btree_checkpoint_generation.v;
 	p->btree_column_fix.v += c->btree_column_fix.v;
 	p->btree_column_internal.v += c->btree_column_internal.v;
 	p->btree_column_deleted.v += c->btree_column_deleted.v;
 	p->btree_column_variable.v += c->btree_column_variable.v;
+	if (c->btree_maxintlkey.v > p->btree_maxintlkey.v)
+	    p->btree_maxintlkey.v = c->btree_maxintlkey.v;
+	if (c->btree_maxintlpage.v > p->btree_maxintlpage.v)
+	    p->btree_maxintlpage.v = c->btree_maxintlpage.v;
+	if (c->btree_maxleafkey.v > p->btree_maxleafkey.v)
+	    p->btree_maxleafkey.v = c->btree_maxleafkey.v;
+	if (c->btree_maxleafpage.v > p->btree_maxleafpage.v)
+	    p->btree_maxleafpage.v = c->btree_maxleafpage.v;
+	if (c->btree_maxleafvalue.v > p->btree_maxleafvalue.v)
+	    p->btree_maxleafvalue.v = c->btree_maxleafvalue.v;
 	if (c->btree_maximum_depth.v > p->btree_maximum_depth.v)
 	    p->btree_maximum_depth.v = c->btree_maximum_depth.v;
 	p->btree_entries.v += c->btree_entries.v;
@@ -298,6 +311,7 @@ __wt_stat_aggregate_dsrc_stats(const void *child, const void *parent)
 	p->bloom_page_evict.v += c->bloom_page_evict.v;
 	p->bloom_page_read.v += c->bloom_page_read.v;
 	p->bloom_count.v += c->bloom_count.v;
+	p->lsm_chunk_count.v += c->lsm_chunk_count.v;
 	if (c->lsm_generation_max.v > p->lsm_generation_max.v)
 	    p->lsm_generation_max.v = c->lsm_generation_max.v;
 	p->lsm_lookup_no_bloom.v += c->lsm_lookup_no_bloom.v;
@@ -398,6 +412,12 @@ __wt_stat_init_connection_stats(WT_CONNECTION_STATS *stats)
 	stats->cache_eviction_walk.desc = "cache: pages walked for eviction";
 	stats->cache_write.desc = "cache: pages written from cache";
 	stats->cache_overhead.desc = "cache: percentage overhead";
+	stats->cache_bytes_internal.desc =
+	    "cache: tracked bytes belonging to internal pages in the cache";
+	stats->cache_bytes_leaf.desc =
+	    "cache: tracked bytes belonging to leaf pages in the cache";
+	stats->cache_bytes_overflow.desc =
+	    "cache: tracked bytes belonging to overflow pages in the cache";
 	stats->cache_bytes_dirty.desc =
 	    "cache: tracked dirty bytes in the cache";
 	stats->cache_pages_dirty.desc =
@@ -441,7 +461,6 @@ __wt_stat_init_connection_stats(WT_CONNECTION_STATS *stats)
 	stats->log_buffer_grow.desc = "log: log buffer size increases";
 	stats->log_bytes_payload.desc = "log: log bytes of payload data";
 	stats->log_bytes_written.desc = "log: log bytes written";
-	stats->log_reads.desc = "log: log read operations";
 	stats->log_compress_writes.desc = "log: log records compressed";
 	stats->log_compress_write_fails.desc =
 	    "log: log records not compressed";
@@ -513,6 +532,8 @@ __wt_stat_init_connection_stats(WT_CONNECTION_STATS *stats)
 	stats->txn_begin.desc = "transaction: transaction begins";
 	stats->txn_checkpoint_running.desc =
 	    "transaction: transaction checkpoint currently running";
+	stats->txn_checkpoint_generation.desc =
+	    "transaction: transaction checkpoint generation";
 	stats->txn_checkpoint_time_max.desc =
 	    "transaction: transaction checkpoint max time (msecs)";
 	stats->txn_checkpoint_time_min.desc =
@@ -526,6 +547,9 @@ __wt_stat_init_connection_stats(WT_CONNECTION_STATS *stats)
 	    "transaction: transaction failures due to cache overflow";
 	stats->txn_pinned_range.desc =
 	    "transaction: transaction range of IDs currently pinned";
+	stats->txn_pinned_checkpoint_range.desc =
+	    "transaction: transaction range of IDs currently pinned by a checkpoint";
+	stats->txn_sync.desc = "transaction: transaction sync calls";
 	stats->txn_commit.desc = "transaction: transactions committed";
 	stats->txn_rollback.desc = "transaction: transactions rolled back";
 }
@@ -537,7 +561,6 @@ __wt_stat_refresh_connection_stats(void *stats_arg)
 
 	stats = (WT_CONNECTION_STATS *)stats_arg;
 	stats->async_cur_queue.v = 0;
-	stats->async_max_queue.v = 0;
 	stats->async_alloc_race.v = 0;
 	stats->async_flush.v = 0;
 	stats->async_alloc_view.v = 0;
@@ -569,7 +592,6 @@ __wt_stat_refresh_connection_stats(void *stats_arg)
 	stats->cache_eviction_hazard.v = 0;
 	stats->cache_inmem_split.v = 0;
 	stats->cache_eviction_internal.v = 0;
-	stats->cache_eviction_maximum_page_size.v = 0;
 	stats->cache_eviction_dirty.v = 0;
 	stats->cache_eviction_deepen.v = 0;
 	stats->cache_eviction_force.v = 0;
@@ -580,8 +602,6 @@ __wt_stat_refresh_connection_stats(void *stats_arg)
 	stats->cache_eviction_split.v = 0;
 	stats->cache_eviction_walk.v = 0;
 	stats->cache_write.v = 0;
-	stats->cache_bytes_dirty.v = 0;
-	stats->cache_pages_dirty.v = 0;
 	stats->cache_eviction_clean.v = 0;
 	stats->memory_allocation.v = 0;
 	stats->memory_free.v = 0;
@@ -614,7 +634,6 @@ __wt_stat_refresh_connection_stats(void *stats_arg)
 	stats->log_buffer_grow.v = 0;
 	stats->log_bytes_payload.v = 0;
 	stats->log_bytes_written.v = 0;
-	stats->log_reads.v = 0;
 	stats->log_compress_writes.v = 0;
 	stats->log_compress_write_fails.v = 0;
 	stats->log_compress_small.v = 0;
@@ -626,7 +645,6 @@ __wt_stat_refresh_connection_stats(void *stats_arg)
 	stats->log_sync_dir.v = 0;
 	stats->log_writes.v = 0;
 	stats->log_slot_consolidated.v = 0;
-	stats->log_prealloc_max.v = 0;
 	stats->log_prealloc_files.v = 0;
 	stats->log_prealloc_used.v = 0;
 	stats->log_slot_toobig.v = 0;
@@ -652,6 +670,7 @@ __wt_stat_refresh_connection_stats(void *stats_arg)
 	stats->txn_begin.v = 0;
 	stats->txn_checkpoint.v = 0;
 	stats->txn_fail_cache.v = 0;
+	stats->txn_sync.v = 0;
 	stats->txn_commit.v = 0;
 	stats->txn_rollback.v = 0;
 }

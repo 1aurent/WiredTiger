@@ -110,7 +110,7 @@ __wt_compact(WT_SESSION_IMPL *session, const char *cfg[])
 	 *
 	 * We're holding the schema lock which serializes with checkpoints.
 	 */
-	WT_ASSERT(session, F_ISSET(session, WT_SESSION_SCHEMA_LOCKED));
+	WT_ASSERT(session, F_ISSET(session, WT_SESSION_LOCKED_SCHEMA));
 
 	/*
 	 * Get the tree handle's flush lock which blocks threads writing leaf
@@ -142,7 +142,6 @@ __wt_compact(WT_SESSION_IMPL *session, const char *cfg[])
 	block_manager_begin = 1;
 
 	/* Walk the tree reviewing pages to see if they should be re-written. */
-	session->compaction = 1;
 	for (;;) {
 		/*
 		 * Pages read for compaction aren't "useful"; don't update the
@@ -159,6 +158,7 @@ __wt_compact(WT_SESSION_IMPL *session, const char *cfg[])
 		if (skip)
 			continue;
 
+		session->compaction = 1;
 		/* Rewrite the page: mark the page and tree dirty. */
 		WT_ERR(__wt_page_modify_init(session, ref->page));
 		__wt_page_modify_set(session, ref->page);

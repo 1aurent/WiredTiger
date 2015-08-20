@@ -24,14 +24,6 @@
 #define	WT_EXABYTE	((uint64_t)1152921504606846976)
 
 /*
- * Number of directory entries can grow dynamically.
- */
-#define	WT_DIR_ENTRY	32
-
-#define	WT_DIRLIST_EXCLUDE	0x1	/* Exclude files matching prefix */
-#define	WT_DIRLIST_INCLUDE	0x2	/* Include files matching prefix */
-
-/*
  * Sizes that cannot be larger than 2**32 are stored in uint32_t fields in
  * common structures to save space.  To minimize conversions from size_t to
  * uint32_t through the code, we use the following macros.
@@ -65,6 +57,12 @@
 /* 10 level skip lists, 1/4 have a link to the next element. */
 #define	WT_SKIP_MAXDEPTH	10
 #define	WT_SKIP_PROBABILITY	(UINT32_MAX >> 2)
+
+/*
+ * Encryption needs to know its original length before either the
+ * block or logging subsystems pad.  Constant value.
+ */
+#define	WT_ENCRYPT_LEN_SIZE	sizeof(uint32_t)
 
 /*
  * __wt_calloc_def, __wt_calloc_one --
@@ -134,6 +132,33 @@
 #define	FLD_ISSET(field, mask)	((field) & ((uint32_t)(mask)))
 #define	FLD_SET(field, mask)	((field) |= ((uint32_t)(mask)))
 
+/*
+ * Insertion sort, for sorting small sets of values.
+ *
+ * The "compare_lt" argument is a function or macro that returns true when
+ * its first argument is less than its second argument.
+ */
+#define	WT_INSERTION_SORT(arrayp, n, value_type, compare_lt) do {	\
+	value_type __v;							\
+	int __i, __j, __n = (int)(n);					\
+	if (__n == 2) {							\
+		__v = (arrayp)[1];					\
+		if (compare_lt(__v, (arrayp)[0])) {			\
+			(arrayp)[1] = (arrayp)[0];			\
+			(arrayp)[0] = __v;				\
+		}							\
+	}								\
+	if (__n > 2) {							\
+		for (__i = 1; __i < __n; ++__i) {			\
+			__v = (arrayp)[__i];				\
+			for (__j = __i - 1; __j >= 0 &&			\
+			    compare_lt(__v, (arrayp)[__j]); --__j)	\
+				(arrayp)[__j + 1] = (arrayp)[__j];	\
+			(arrayp)[__j + 1] = __v;			\
+		}							\
+	}								\
+} while (0)
+
 /* Verbose messages. */
 #ifdef HAVE_VERBOSE
 #define	WT_VERBOSE_ISSET(session, f)					\
@@ -142,17 +167,6 @@
 #define	WT_VERBOSE_ISSET(session, f)	0
 #endif
 
-/*
- * Clear a structure, two flavors: inline when we want to guarantee there's
- * no function call or setup/tear-down of a loop, and the default where the
- * compiler presumably chooses.  Gcc 4.3 is supposed to get this right, but
- * we've seen problems when calling memset to clear structures in performance
- * critical paths.
- */
-#define	WT_CLEAR_INLINE(type, s) do {					\
-	static const type __clear;					\
-	s = __clear;							\
-} while (0)
 #define	WT_CLEAR(s)							\
 	memset(&(s), 0, sizeof(s))
 
@@ -182,10 +196,6 @@
 #define	WT_STRING_MATCH(str, bytes, len)				\
 	(((const char *)str)[0] == ((const char *)bytes)[0] &&		\
 	    strncmp(str, bytes, len) == 0 && (str)[(len)] == '\0')
-#define	WT_STRING_CASE_MATCH(str, bytes, len)				\
-	(tolower(((const char *)str)[0]) ==				\
-	    tolower(((const char *)bytes)[0]) &&			\
-	    strncasecmp(str, bytes, len) == 0 && (str)[(len)] == '\0')
 
 /*
  * Macro that produces a string literal that isn't wrapped in quotes, to avoid

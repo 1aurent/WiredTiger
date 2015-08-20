@@ -105,6 +105,7 @@ __curfile_enter(WT_CURSOR_BTREE *cbt)
 static inline int
 __curfile_leave(WT_CURSOR_BTREE *cbt)
 {
+	WT_DECL_RET;
 	WT_SESSION_IMPL *session;
 
 	session = (WT_SESSION_IMPL *)cbt->iface.session;
@@ -125,13 +126,16 @@ __curfile_leave(WT_CURSOR_BTREE *cbt)
 	cbt->page_deleted_count = 0;
 
 	/*
-	 * Release any page references we're holding.  This can trigger
-	 * eviction (e.g., forced eviction of big pages), so it is important to
-	 * do it after releasing our snapshot above.
+	 * Release any page references we're holding. This can trigger eviction
+	 * (e.g., forced eviction of big pages), so it's important to do after
+	 * releasing our snapshot above.
+	 *
+	 * Clear the reference regardless, so we don't try the release twice.
 	 */
-	WT_RET(__wt_page_release(session, cbt->ref, 0));
+	ret = __wt_page_release(session, cbt->ref, 0);
 	cbt->ref = NULL;
-	return (0);
+
+	return (ret);
 }
 
 /*
@@ -177,22 +181,14 @@ static inline int
 __cursor_func_init(WT_CURSOR_BTREE *cbt, int reenter)
 {
 	WT_SESSION_IMPL *session;
-	WT_TXN *txn;
 
 	session = (WT_SESSION_IMPL *)cbt->iface.session;
-	txn = &session->txn;
 
 	if (reenter)
 		WT_RET(__curfile_leave(cbt));
 
-	/*
-	 * If there is no transaction active in this thread and we haven't
-	 * checked if the cache is full, do it now.  If we have to block for
-	 * eviction, this is the best time to do it.
-	 */
-	if (F_ISSET(txn, TXN_RUNNING) &&
-	    !F_ISSET(txn, TXN_HAS_ID) && !F_ISSET(txn, TXN_HAS_SNAPSHOT))
-		WT_RET(__wt_cache_full_check(session));
+	/* If the transaction is idle, check that the cache isn't full. */
+	WT_RET(__wt_txn_idle_cache_check(session));
 
 	if (!F_ISSET(cbt, WT_CBT_ACTIVE))
 		WT_RET(__curfile_enter(cbt));
@@ -272,7 +268,7 @@ __cursor_row_slot_return(WT_CURSOR_BTREE *cbt, WT_ROW *rip, WT_UPDATE *upd)
 	__wt_cell_unpack(cell, unpack);
 	if (unpack->type == WT_CELL_KEY &&
 	    cbt->rip_saved != NULL && cbt->rip_saved == rip - 1) {
-		WT_ASSERT(session, cbt->tmp.size >= unpack->prefix);
+		WT_ASSERT(session, cbt->row_key->size >= unpack->prefix);
 
 		/*
 		 * Grow the buffer as necessary as well as ensure data has been
@@ -282,22 +278,22 @@ __cursor_row_slot_return(WT_CURSOR_BTREE *cbt, WT_ROW *rip, WT_UPDATE *upd)
 		 * Don't grow the buffer unnecessarily or copy data we don't
 		 * need, truncate the item's data length to the prefix bytes.
 		 */
-		cbt->tmp.size = unpack->prefix;
+		cbt->row_key->size = unpack->prefix;
 		WT_RET(__wt_buf_grow(
-		    session, &cbt->tmp, cbt->tmp.size + unpack->size));
-		memcpy((uint8_t *)cbt->tmp.data + cbt->tmp.size,
+		    session, cbt->row_key, cbt->row_key->size + unpack->size));
+		memcpy((uint8_t *)cbt->row_key->data + cbt->row_key->size,
 		    unpack->data, unpack->size);
-		cbt->tmp.size += unpack->size;
+		cbt->row_key->size += unpack->size;
 	} else {
 		/*
 		 * Call __wt_row_leaf_key_work instead of __wt_row_leaf_key: we
 		 * already did __wt_row_leaf_key's fast-path checks inline.
 		 */
-slow:		WT_RET(
-		    __wt_row_leaf_key_work(session, page, rip, &cbt->tmp, 0));
+slow:		WT_RET(__wt_row_leaf_key_work(
+		    session, page, rip, cbt->row_key, 0));
 	}
-	kb->data = cbt->tmp.data;
-	kb->size = cbt->tmp.size;
+	kb->data = cbt->row_key->data;
+	kb->size = cbt->row_key->size;
 	cbt->rip_saved = rip;
 
 value:

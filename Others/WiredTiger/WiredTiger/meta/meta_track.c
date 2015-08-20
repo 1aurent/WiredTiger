@@ -184,11 +184,40 @@ free:	trk->op = WT_ST_EMPTY;
 }
 
 /*
+ * __wt_meta_track_find_handle --
+ *	Check if we have already seen a handle.
+ */
+int
+__wt_meta_track_find_handle(
+    WT_SESSION_IMPL *session, const char *name, const char *checkpoint)
+{
+	WT_META_TRACK *trk, *trk_orig;
+
+	WT_ASSERT(session,
+	    WT_META_TRACKING(session) && session->meta_track_nest > 0);
+
+	trk_orig = session->meta_track;
+	trk = session->meta_track_next;
+
+	while (--trk >= trk_orig) {
+		if (trk->op != WT_ST_LOCK)
+			continue;
+		if (strcmp(trk->dhandle->name, name) == 0 &&
+		    ((trk->dhandle->checkpoint == NULL && checkpoint == NULL) ||
+		    (trk->dhandle->checkpoint != NULL &&
+		    strcmp(trk->dhandle->checkpoint, checkpoint) == 0)))
+			return (0);
+	}
+
+	return (WT_NOTFOUND);
+}
+
+/*
  * __wt_meta_track_off --
  *	Turn off metadata operation tracking, unrolling on error.
  */
 int
-__wt_meta_track_off(WT_SESSION_IMPL *session, int unroll)
+__wt_meta_track_off(WT_SESSION_IMPL *session, int need_sync, int unroll)
 {
 	WT_DECL_RET;
 	WT_META_TRACK *trk, *trk_orig;
@@ -218,13 +247,28 @@ __wt_meta_track_off(WT_SESSION_IMPL *session, int unroll)
 		WT_TRET(__meta_track_apply(session, trk, unroll));
 
 	/*
-	 * If the operation succeeded and we aren't relying on the log for
-	 * durability, checkpoint the metadata.
+	 * Unroll operations don't need to flush the metadata.
+	 *
+	 * Also, if we don't have the metadata handle (e.g, we're in the
+	 * process of creating the metadata), we can't sync it.
 	 */
-	if (!unroll && ret == 0 && session->meta_dhandle != NULL &&
-	    !FLD_ISSET(S2C(session)->log_flags, WT_CONN_LOG_ENABLED))
+	if (unroll || ret != 0 || !need_sync || session->meta_dhandle == NULL)
+		return (ret);
+
+	/* If we're logging, make sure the metadata update was flushed. */
+	if (FLD_ISSET(S2C(session)->log_flags, WT_CONN_LOG_ENABLED)) {
+		if (!FLD_ISSET(S2C(session)->txn_logsync,
+		    WT_LOG_DSYNC | WT_LOG_FSYNC))
+			WT_WITH_DHANDLE(session, session->meta_dhandle,
+			    ret = __wt_txn_checkpoint_log(session,
+			    0, WT_TXN_LOG_CKPT_SYNC, NULL));
+	} else {
 		WT_WITH_DHANDLE(session, session->meta_dhandle,
 		    ret = __wt_checkpoint(session, NULL));
+		WT_RET(ret);
+		WT_WITH_DHANDLE(session, session->meta_dhandle,
+		    ret = __wt_checkpoint_sync(session, NULL));
+	}
 
 	return (ret);
 }
@@ -342,10 +386,8 @@ __wt_meta_track_fileop(
 	WT_RET(__meta_track_next(session, &trk));
 
 	trk->op = WT_ST_FILEOP;
-	if (olduri != NULL)
-		WT_RET(__wt_strdup(session, olduri, &trk->a));
-	if (newuri != NULL)
-		WT_RET(__wt_strdup(session, newuri, &trk->b));
+	WT_RET(__wt_strdup(session, olduri, &trk->a));
+	WT_RET(__wt_strdup(session, newuri, &trk->b));
 	return (0);
 }
 

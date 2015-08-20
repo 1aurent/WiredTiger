@@ -137,7 +137,7 @@ __wt_block_checkpoint_load(WT_SESSION_IMPL *session, WT_BLOCK *block,
 		WT_ERR(__wt_verbose(session, WT_VERB_CHECKPOINT,
 		    "truncate file to %" PRIuMAX, (uintmax_t)ci->file_size));
 		WT_ERR_BUSY_OK(
-		    __wt_ftruncate(session, block->fh, ci->file_size));
+		    __wt_block_truncate(session, block->fh, ci->file_size));
 	}
 
 	if (0) {
@@ -185,7 +185,7 @@ __wt_block_checkpoint_unload(
 		 * an open checkpoint on the file), that's OK.
 		 */
 		WT_TRET_BUSY_OK(
-		    __wt_ftruncate(session, block->fh, block->fh->size));
+		    __wt_block_truncate(session, block->fh, block->fh->size));
 
 		__wt_spin_lock(session, &block->live_lock);
 		__wt_block_ckpt_destroy(session, &block->live);
@@ -224,6 +224,9 @@ __wt_block_checkpoint(WT_SESSION_IMPL *session,
 
 	ci = &block->live;
 
+	/* Switch to first-fit allocation. */
+	__wt_block_configure_first_fit(block, 1);
+
 	/*
 	 * Write the root page: it's possible for there to be a checkpoint of
 	 * an empty tree, in which case, we store an illegal root offset.
@@ -237,7 +240,7 @@ __wt_block_checkpoint(WT_SESSION_IMPL *session,
 		ci->root_offset = WT_BLOCK_INVALID_OFFSET;
 		ci->root_size = ci->root_cksum = 0;
 	} else
-		WT_RET(__wt_block_write_off(session, block, buf,
+		WT_ERR(__wt_block_write_off(session, block, buf,
 		    &ci->root_offset, &ci->root_size, &ci->root_cksum,
 		    data_cksum, 0));
 
@@ -245,13 +248,16 @@ __wt_block_checkpoint(WT_SESSION_IMPL *session,
 	 * Checkpoints are potentially reading/writing/merging lots of blocks,
 	 * pre-allocate structures for this thread's use.
 	 */
-	WT_RET(__wt_block_ext_prealloc(session, 250));
+	WT_ERR(__wt_block_ext_prealloc(session, 250));
 
 	/* Process the checkpoint list, deleting and updating as required. */
 	ret = __ckpt_process(session, block, ckptbase);
 
 	/* Discard any excessive memory we've allocated. */
 	WT_TRET(__wt_block_ext_discard(session, 250));
+
+	/* Restore the original allocation plan. */
+err:	__wt_block_configure_first_fit(block, 0);
 
 	return (ret);
 }

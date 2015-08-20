@@ -14,14 +14,15 @@
  */
 static int
 __handle_error_default(WT_EVENT_HANDLER *handler,
-    WT_SESSION *session, int error, const char *errmsg)
+    WT_SESSION *wt_session, int error, const char *errmsg)
 {
 	WT_UNUSED(handler);
-	WT_UNUSED(session);
+	WT_UNUSED(wt_session);
 	WT_UNUSED(error);
 
-	return (fprintf(stderr, "%s\n", errmsg) >= 0 &&
-	    fflush(stderr) == 0 ? 0 : __wt_errno());
+	WT_RET(__wt_fprintf(stderr, "%s\n", errmsg));
+	WT_RET(__wt_fflush(stderr));
+	return (0);
 }
 
 /*
@@ -30,13 +31,14 @@ __handle_error_default(WT_EVENT_HANDLER *handler,
  */
 static int
 __handle_message_default(WT_EVENT_HANDLER *handler,
-    WT_SESSION *session, const char *message)
+    WT_SESSION *wt_session, const char *message)
 {
 	WT_UNUSED(handler);
-	WT_UNUSED(session);
+	WT_UNUSED(wt_session);
 
-	return (printf("%s\n", message) >= 0 &&
-	    fflush(stdout) == 0 ? 0 : __wt_errno());
+	WT_RET(__wt_fprintf(stdout, "%s\n", message));
+	WT_RET(__wt_fflush(stdout));
+	return (0);
 }
 
 /*
@@ -45,10 +47,10 @@ __handle_message_default(WT_EVENT_HANDLER *handler,
  */
 static int
 __handle_progress_default(WT_EVENT_HANDLER *handler,
-    WT_SESSION *session, const char *operation, uint64_t progress)
+    WT_SESSION *wt_session, const char *operation, uint64_t progress)
 {
 	WT_UNUSED(handler);
-	WT_UNUSED(session);
+	WT_UNUSED(wt_session);
 	WT_UNUSED(operation);
 	WT_UNUSED(progress);
 
@@ -61,10 +63,10 @@ __handle_progress_default(WT_EVENT_HANDLER *handler,
  */
 static int
 __handle_close_default(WT_EVENT_HANDLER *handler,
-    WT_SESSION *session, WT_CURSOR *cursor)
+    WT_SESSION *wt_session, WT_CURSOR *cursor)
 {
 	WT_UNUSED(handler);
-	WT_UNUSED(session);
+	WT_UNUSED(wt_session);
 	WT_UNUSED(cursor);
 
 	return (0);
@@ -97,7 +99,7 @@ __handler_failure(WT_SESSION_IMPL *session,
 
 	(void)snprintf(s, sizeof(s),
 	    "application %s event handler failed: %s",
-	    which, wiredtiger_strerror(error));
+	    which, __wt_strerror(session, error, NULL, 0));
 
 	/*
 	 * Use the error handler to report the failure, unless it was the error
@@ -172,20 +174,24 @@ __wt_eventv(WT_SESSION_IMPL *session, int msg_event, int error,
 	 * first session, but if the allocation of the first session fails, for
 	 * example, we can end up here without a session.)
 	 */
-	if (session == NULL)
-		return (fprintf(stderr, "WiredTiger Error%s%s\n",
+	if (session == NULL) {
+		WT_RET(__wt_fprintf(stderr,
+		    "WiredTiger Error%s%s: ",
 		    error == 0 ? "" : ": ",
-		    error == 0 ? "" : wiredtiger_strerror(error)) >= 0 &&
-		    fflush(stderr) == 0 ? 0 : __wt_errno());
+		    error == 0 ? "" : __wt_strerror(session, error, NULL, 0)));
+		WT_RET(__wt_vfprintf(stderr, fmt, ap));
+		WT_RET(__wt_fprintf(stderr, "\n"));
+		return (__wt_fflush(stderr));
+	}
 
 	p = s;
 	end = s + sizeof(s);
 
 	/*
-	 * We have several prefixes for the error message:
-	 * a timestamp and the process and thread ids, the database error
-	 * prefix, the data-source's name, and the session's name.  Write them
-	 * as a comma-separate list, followed by a colon.
+	 * We have several prefixes for the error message: a timestamp and the
+	 * process and thread ids, the database error prefix, the data-source's
+	 * name, and the session's name.  Write them as a comma-separate list,
+	 * followed by a colon.
 	 */
 	prefix_cnt = 0;
 	if (__wt_epoch(session, &ts) == 0) {
@@ -247,7 +253,7 @@ __wt_eventv(WT_SESSION_IMPL *session, int msg_event, int error,
 		 * Use strcmp to compare: both strings are nul-terminated, and
 		 * we don't want to run past the end of the buffer.
 		 */
-		err = wiredtiger_strerror(error);
+		err = __wt_strerror(session, error, NULL, 0);
 		len = strlen(err);
 		if (WT_PTRDIFF(p, s) < len || strcmp(p - len, err) != 0) {
 			remain = WT_PTRDIFF(end, p);

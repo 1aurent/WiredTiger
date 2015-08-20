@@ -32,7 +32,6 @@ struct __wt_hazard {
 
 /* Get the connection implementation for a session */
 #define	S2C(session)	  ((WT_CONNECTION_IMPL *)(session)->iface.connection)
-#define	S2C_SAFE(session) ((session) == NULL ? NULL : S2C(session))
 
 /* Get the btree for a session */
 #define	S2BT(session)	   ((WT_BTREE *)(session)->dhandle->handle)
@@ -68,8 +67,6 @@ struct WT_COMPILER_TYPE_ALIGN(WT_CACHE_LINE_ALIGNMENT) __wt_session_impl {
 	 */
 					/* Session handle reference list */
 	SLIST_HEAD(__dhandles, __wt_data_handle_cache) dhandles;
-#define	WT_DHANDLE_SWEEP_WAIT	30	/* Idle wait before discarding */
-#define	WT_DHANDLE_SWEEP_PERIOD	10	/* Sweep interim */
 	time_t last_sweep;		/* Last sweep for dead handles */
 
 	WT_CURSOR *cursor;		/* Current cursor */
@@ -115,11 +112,8 @@ struct WT_COMPILER_TYPE_ALIGN(WT_CACHE_LINE_ALIGNMENT) __wt_session_impl {
 
 	WT_TXN_ISOLATION isolation;
 	WT_TXN	txn;			/* Transaction state */
+	WT_LSN	bg_sync_lsn;		/* Background sync operation LSN. */
 	u_int	ncursors;		/* Count of active file cursors. */
-
-	WT_REF **excl;			/* Eviction exclusive list */
-	u_int	 excl_next;		/* Next empty slot */
-	size_t	 excl_allocated;	/* Bytes allocated */
 
 	void	*block_manager;		/* Block-manager support */
 	int	(*block_manager_cleanup)(WT_SESSION_IMPL *);
@@ -152,9 +146,9 @@ struct WT_COMPILER_TYPE_ALIGN(WT_CACHE_LINE_ALIGNMENT) __wt_session_impl {
 	 * to clear everything but the fields that persist.
 	 */
 #define	WT_SESSION_CLEAR_SIZE(s)					\
-	(WT_PTRDIFF(&(s)->rnd[0], s))
+	(WT_PTRDIFF(&(s)->rnd, s))
 
-	uint32_t rnd[2];		/* Random number generation state */
+	uint64_t rnd;			/* Random number generation state */
 
 					/* Hashed handle reference list array */
 	SLIST_HEAD(__dhandles_hash, __wt_data_handle_cache) *dhhash;
