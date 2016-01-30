@@ -42,7 +42,7 @@ namespace WiredTigerTest
 
         static void Main(string[] args)
         {
-            using (var tst = WiredTigerNet.Connection.Open(@"C:\_perso\test\DB\", 
+            using (var tst = WiredTigerNet.Connection.Open(@"D:\_dev\WiredTiger\_Test\", 
                 "create"
                 + ",cache_size=5G,eviction=(threads_max=4)"
                 //+ ",log=(compressor=snappy,enabled,prealloc)"

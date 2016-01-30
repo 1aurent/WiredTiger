@@ -142,9 +142,6 @@
     <ClCompile Include="config\config_collapse.c">
       <Filter>Src</Filter>
     </ClCompile>
-    <ClCompile Include="config\config_concat.c">
-      <Filter>Src</Filter>
-    </ClCompile>
     <ClCompile Include="config\config_def.c">
       <Filter>Src</Filter>
     </ClCompile>
@@ -376,9 +373,6 @@
     <ClCompile Include="support\huffman.c">
       <Filter>Src</Filter>
     </ClCompile>
-    <ClCompile Include="support\mutex.c">
-      <Filter>Src</Filter>
-    </ClCompile>
     <ClCompile Include="support\pow.c">
       <Filter>Src</Filter>
     </ClCompile>
@@ -505,7 +499,16 @@
     <ClCompile Include="zlib_compress.c">
       <Filter>Ext</Filter>
     </ClCompile>
+    <ClCompile Include="cache\cache_las.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="cursor\cur_join.c">
+      <Filter>Src</Filter>
+    </ClCompile>
     <ClCompile Include="lsm\lsm_cursor_bulk.c">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="os_posix\os_stdio.c">
       <Filter>Src</Filter>
     </ClCompile>
     <ClCompile Include="support\crypto.c">
@@ -513,9 +516,6 @@
     </ClCompile>
     <ClCompile Include="txn\txn_nsnap.c">
       <Filter>Src</Filter>
-    </ClCompile>
-    <ClCompile Include="os_posix\os_stdio.c">
-      <Filter>Psx</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
